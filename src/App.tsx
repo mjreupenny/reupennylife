@@ -1642,12 +1642,140 @@ const ClientPage = () => {
   );
 };
 
+// --- Logo Splash Intro ---
+
+const LogoSplash = ({ onComplete }: { onComplete: () => void }) => {
+  // Phase: 'enter' | 'spin' | 'fly' | 'done'
+  const [phase, setPhase] = useState<'enter' | 'spin' | 'fly'>('enter');
+
+  useEffect(() => {
+    // Phase timeline:
+    // 0ms     → 'enter': overlay fades in, logo scales up
+    // 300ms   → 'spin': 3D rotation begins
+    // 2200ms  → 'fly': logo moves to upper-left corner
+    // 3000ms  → onComplete: overlay gone, page shows
+    const t1 = setTimeout(() => setPhase('spin'), 300);
+    const t2 = setTimeout(() => setPhase('fly'), 2200);
+    const t3 = setTimeout(() => onComplete(), 3100);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [onComplete]);
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none"
+      // The whole overlay fades out during 'fly'
+      initial={{ opacity: 1 }}
+      animate={{ opacity: phase === 'fly' ? 0 : 1 }}
+      transition={{ duration: phase === 'fly' ? 0.85 : 0.3, ease: 'easeInOut' }}
+      style={{
+        background:
+          'radial-gradient(ellipse at 50% 50%, #0d1e3a 0%, #050c1a 70%, #000 100%)',
+      }}
+    >
+      {/* Radial shimmer ring */}
+      <motion.div
+        className="absolute rounded-full border border-agency-gold/30"
+        initial={{ width: 180, height: 180, opacity: 0 }}
+        animate={phase === 'spin' || phase === 'enter'
+          ? { width: [180, 260, 180], height: [180, 260, 180], opacity: [0, 0.6, 0] }
+          : { opacity: 0 }}
+        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+      />
+
+      {/* Logo wrapper — handles position + scale flight */}
+      <motion.div
+        // Center → upper-left corner
+        initial={{ x: 0, y: 0, scale: 1 }}
+        animate={
+          phase === 'fly'
+            ? {
+              // Move from center of viewport toward upper-left navbar position.
+              // x: about half the viewport width left + 24px padding offset
+              // y: about half the viewport height up
+              x: 'calc(-50vw + 48px)',
+              y: 'calc(-50vh + 32px)',
+              scale: 0.26,
+            }
+            : { x: 0, y: 0, scale: 1 }
+        }
+        transition={phase === 'fly'
+          ? { duration: 0.75, ease: [0.4, 0, 0.2, 1] }
+          : { duration: 0 }
+        }
+        style={{ perspective: '800px' }}
+      >
+        {/* Gold glow backdrop */}
+        <motion.div
+          className="absolute inset-0 rounded-full blur-3xl bg-agency-gold/25"
+          initial={{ opacity: 0 }}
+          animate={phase === 'fly' ? { opacity: 0 } : { opacity: [0, 1, 0.5] }}
+          transition={{ duration: 1.2, delay: 0.3 }}
+        />
+
+        {/* The spinning logo box */}
+        <motion.div
+          className="relative w-40 h-40 bg-agency-navy rounded-[2rem] flex items-center justify-center shadow-2xl shadow-black/60"
+          style={{ transformStyle: 'preserve-3d' }}
+          initial={{ rotateY: 0, scale: 0.4, opacity: 0 }}
+          animate={
+            phase === 'enter'
+              ? { rotateY: 0, scale: 1, opacity: 1 }
+              : phase === 'spin'
+                ? { rotateY: 720, scale: 1, opacity: 1 }
+                : { rotateY: 720, scale: 1, opacity: 1 }
+          }
+          transition={
+            phase === 'enter'
+              ? { duration: 0.5, ease: 'backOut' }
+              : phase === 'spin'
+                ? { duration: 1.9, ease: [0.4, 0, 0.2, 1] }
+                : { duration: 0 }
+          }
+        >
+          {/* Sheen overlay on face */}
+          <div className="absolute inset-0 rounded-[2rem] overflow-hidden pointer-events-none">
+            <div className="absolute -top-1/2 -left-1/4 w-3/4 h-full bg-white/10 rotate-12 blur-sm" />
+          </div>
+
+          <AgencyLogo size={88} className="text-white relative z-10" />
+
+          {/* Gold border ring */}
+          <div className="absolute inset-0 rounded-[2rem] border-2 border-agency-gold/40" />
+        </motion.div>
+
+        {/* Brand text — fades in after spin starts */}
+        <motion.div
+          className="text-center mt-8"
+          initial={{ opacity: 0, y: 10 }}
+          animate={phase === 'fly' ? { opacity: 0 } : phase === 'spin' ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
+          transition={{ duration: 0.5, delay: phase === 'spin' ? 0.8 : 0 }}
+        >
+          <p className="text-3xl font-serif font-bold tracking-tight text-white leading-none">REUPENNY</p>
+          <p className="text-[11px] uppercase tracking-[0.3em] font-medium text-agency-gold/80 mt-1">Life Agency</p>
+        </motion.div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
   const [view, setView] = useState('home'); // 'home', 'client', 'recruit', 'dashboard'
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Show splash once per browser session
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const seen = sessionStorage.getItem('reupennyIntroSeen');
+    return !seen;
+  });
+
+  const handleSplashComplete = React.useCallback(() => {
+    sessionStorage.setItem('reupennyIntroSeen', '1');
+    setShowSplash(false);
+  }, []);
 
   // Scroll to top on view change
   useEffect(() => {
@@ -1666,6 +1794,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white selection:bg-agency-gold/30">
+      <AnimatePresence>
+        {showSplash && <LogoSplash key="splash" onComplete={handleSplashComplete} />}
+      </AnimatePresence>
       {/* Skip to main content — keyboard accessibility */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <Navbar
