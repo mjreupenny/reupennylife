@@ -346,10 +346,12 @@ const Partners = () => {
     {
       name: 'United Home Life',
       logo: 'https://nsgacommunications.com/2019-logos/Carrier-Logo-Web-270x200-United-Home-Life.jpg',
+      logoClass: 'h-12',
     },
     {
       name: 'Americo',
       logo: 'https://www.ahcpsales.com/wp-content/uploads/2024/05/Americo-Carrier-Logo-AHCP.png',
+      logoClass: 'h-12',
     },
     {
       name: 'Mutual of Omaha',
@@ -371,6 +373,7 @@ const Partners = () => {
     {
       name: 'SBLI',
       logo: 'https://www.sbli.com/wp-content/uploads/2021/05/sbli-logo.png',
+      logoClass: 'h-12',
     },
     {
       name: 'John Hancock',
