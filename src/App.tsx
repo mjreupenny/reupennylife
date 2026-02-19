@@ -4,18 +4,18 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Shield, 
-  ChevronRight, 
-  Lock, 
-  Play, 
-  Search, 
-  ArrowRight, 
-  Users, 
-  Heart, 
-  Home, 
-  TrendingUp, 
-  Menu, 
+import {
+  Shield,
+  ChevronRight,
+  Lock,
+  Play,
+  Search,
+  ArrowRight,
+  Users,
+  Heart,
+  Home,
+  TrendingUp,
+  Menu,
   X,
   CheckCircle2,
   Briefcase,
@@ -54,40 +54,40 @@ import { motion, AnimatePresence } from 'motion/react';
 // --- Components ---
 
 const AgencyLogo = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="none" 
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
     className={className}
   >
-    <path 
-      d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
+    <path
+      d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     />
     {/* Ornate Heraldic Cross */}
-    <path 
-      d="M12 7v10M7 12h10" 
-      stroke="#c5a059" 
-      strokeWidth="1.2" 
-      strokeLinecap="round" 
+    <path
+      d="M12 7v10M7 12h10"
+      stroke="#c5a059"
+      strokeWidth="1.2"
+      strokeLinecap="round"
     />
-    <path 
-      d="M10.5 8.5L12 6.5l1.5 2M10.5 15.5L12 17.5l1.5-2M8.5 10.5L6.5 12l2 1.5M15.5 10.5L17.5 12l-2 1.5" 
-      stroke="#c5a059" 
-      strokeWidth="1.2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
+    <path
+      d="M10.5 8.5L12 6.5l1.5 2M10.5 15.5L12 17.5l1.5-2M8.5 10.5L6.5 12l2 1.5M15.5 10.5L17.5 12l-2 1.5"
+      stroke="#c5a059"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     />
     <circle cx="12" cy="12" r="1.2" fill="#c5a059" />
   </svg>
 );
 
-const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: { 
-  onNavigate: (view: string) => void, 
+const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: {
+  onNavigate: (view: string) => void,
   currentView: string,
   onLoginOpen: () => void,
   isAuthenticated: boolean
@@ -108,11 +108,26 @@ const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: {
     { name: 'Join Team', view: 'recruit' },
   ];
 
+  const handleNavClick = (link: { name: string; view: string; section?: string }) => {
+    if (link.section && currentView === 'home') {
+      const el = document.getElementById(link.section);
+      if (el) { el.scrollIntoView({ behavior: 'smooth' }); return; }
+    }
+    onNavigate(link.view);
+    // After navigating to home, scroll to section on next tick
+    if (link.section && link.view === 'home') {
+      setTimeout(() => {
+        const el = document.getElementById(link.section!);
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  };
+
   return (
     <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled ? 'bg-white/90 backdrop-blur-md shadow-sm py-3' : 'bg-transparent py-6'}`}>
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
-        <div 
-          className="flex items-center gap-2 cursor-pointer group" 
+        <div
+          className="flex items-center gap-2 cursor-pointer group"
           onClick={() => onNavigate('home')}
         >
           <div className="w-10 h-10 bg-agency-navy rounded-lg flex items-center justify-center text-white group-hover:bg-agency-gold transition-colors">
@@ -129,19 +144,18 @@ const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: {
           {navLinks.map((link) => (
             <button
               key={link.name}
-              onClick={() => onNavigate(link.view)}
-              className={`text-sm font-medium uppercase tracking-widest hover:text-agency-gold transition-colors ${currentView === link.view ? 'text-agency-gold' : 'text-agency-navy/70'}`}
+              onClick={() => handleNavClick(link)}
+              className={`cursor-pointer text-sm font-medium uppercase tracking-widest hover:text-agency-gold transition-colors ${currentView === link.view ? 'text-agency-gold' : 'text-agency-navy/70'}`}
             >
               {link.name}
             </button>
           ))}
-          <button 
+          <button
             onClick={onLoginOpen}
-            className={`flex items-center gap-2 px-5 py-2 rounded-full border transition-all text-sm font-medium uppercase tracking-widest ${
-              isAuthenticated 
-                ? 'bg-agency-gold border-agency-gold text-white hover:bg-agency-navy hover:border-agency-navy' 
-                : 'border-agency-navy/10 hover:border-agency-gold hover:text-agency-gold'
-            }`}
+            className={`cursor-pointer flex items-center gap-2 px-5 py-2 rounded-full border transition-all text-sm font-medium uppercase tracking-widest ${isAuthenticated
+              ? 'bg-agency-gold border-agency-gold text-white hover:bg-agency-navy hover:border-agency-navy'
+              : 'border-agency-navy/10 hover:border-agency-gold hover:text-agency-gold'
+              }`}
           >
             {isAuthenticated ? <LayoutDashboard size={14} /> : <Lock size={14} />}
             {isAuthenticated ? 'Dashboard' : 'Agent Access'}
@@ -149,15 +163,20 @@ const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: {
         </div>
 
         {/* Mobile Toggle */}
-        <button className="md:hidden" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-          {isMenuOpen ? <X /> : <Menu />}
+        <button
+          className="md:hidden cursor-pointer p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          onClick={() => setIsMenuOpen(!isMenuOpen)}
+          aria-label={isMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          aria-expanded={isMenuOpen}
+        >
+          {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
       </div>
 
       {/* Mobile Menu */}
       <AnimatePresence>
         {isMenuOpen && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
@@ -167,20 +186,20 @@ const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: {
               <button
                 key={link.name}
                 onClick={() => {
-                  onNavigate(link.view);
+                  handleNavClick(link);
                   setIsMenuOpen(false);
                 }}
-                className="text-left text-lg font-medium py-2 border-b border-gray-50"
+                className="cursor-pointer text-left text-lg font-medium py-2 border-b border-gray-50 hover:text-agency-gold transition-colors"
               >
                 {link.name}
               </button>
             ))}
-            <button 
+            <button
               onClick={() => {
                 onLoginOpen();
                 setIsMenuOpen(false);
               }}
-              className="flex items-center gap-2 py-4 text-agency-gold font-bold uppercase tracking-widest"
+              className="cursor-pointer flex items-center gap-2 py-4 text-agency-gold font-bold uppercase tracking-widest"
             >
               {isAuthenticated ? <LayoutDashboard size={18} /> : <Lock size={18} />}
               {isAuthenticated ? 'Dashboard' : 'Agent Access'}
@@ -203,9 +222,9 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
           transition={{ duration: 2, ease: "easeOut" }}
           className="w-full h-full"
         >
-          <img 
-            src="https://lh3.googleusercontent.com/d/1YAAaGfNKACdaztW1WK1C-KPoSUPiLB9X" 
-            alt="Reupenny Family Legacy Background" 
+          <img
+            src="https://lh3.googleusercontent.com/d/1YAAaGfNKACdaztW1WK1C-KPoSUPiLB9X"
+            alt="Reupenny Family Legacy Background"
             className="w-full h-full object-cover grayscale object-[70%_center]"
             referrerPolicy="no-referrer"
           />
@@ -217,7 +236,7 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
       <div className="max-w-7xl mx-auto px-6 w-full relative z-10">
         <div className="grid lg:grid-cols-12 gap-12 items-center">
           {/* Left Content */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -40 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, ease: "easeOut" }}
@@ -226,7 +245,7 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
             <div className="flex flex-wrap gap-4 mb-10">
               <div className="inline-flex items-center gap-3 px-4 py-1.5 rounded-full bg-white shadow-sm border border-agency-gold/20 text-agency-gold text-[11px] font-bold uppercase tracking-[0.2em]">
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-agency-gold opacity-75"></span>
+                  <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-agency-gold opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-agency-gold"></span>
                 </span>
                 Advanced Wealth Strategies
@@ -236,26 +255,26 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
                 Personalize Your Legacy
               </div>
             </div>
-            
-            <h1 className="text-[80px] md:text-[110px] font-bold leading-[0.85] mb-10 text-agency-navy tracking-[-0.04em]">
+
+            <h1 className="text-[clamp(3rem,10vw,6.875rem)] font-bold leading-[0.85] mb-10 text-agency-navy tracking-[-0.04em]">
               Secure Your <br />
               <span className="text-agency-gold italic font-serif font-normal">Legacy.</span><br />
               Protect Your Future.
             </h1>
-            
+
             <p className="text-xl md:text-2xl text-agency-navy/60 max-w-xl mb-12 leading-relaxed font-normal">
               Most families are one major life event away from financial hardship. We specialize in advanced strategies—IBC, DFL, and Living Benefits—that work while you're alive.
             </p>
-            
+
             <div className="flex flex-wrap items-center gap-8">
-              <button 
+              <button
                 onClick={() => onNavigate('client')}
-                className="px-12 py-6 bg-agency-navy text-white rounded-2xl font-bold flex items-center gap-4 hover:bg-agency-gold transition-all duration-300 group shadow-2xl shadow-agency-navy/20"
+                className="cursor-pointer px-12 py-6 bg-agency-navy text-white rounded-2xl font-bold flex items-center gap-4 hover:bg-agency-gold transition-all duration-300 group shadow-2xl shadow-agency-navy/20"
               >
                 REQUEST STRATEGY CALL
                 <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
               </button>
-              <button className="flex items-center gap-4 font-bold text-agency-navy group">
+              <button className="cursor-pointer flex items-center gap-4 font-bold text-agency-navy group">
                 <div className="w-16 h-16 rounded-full bg-agency-gold flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
                   <Play size={22} className="text-white ml-1" fill="currentColor" />
                 </div>
@@ -265,13 +284,13 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
           </motion.div>
 
           {/* Right Content - Floating Cards */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: 40 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 1, delay: 0.3 }}
             className="lg:col-span-5 flex flex-col gap-6"
           >
-            <div className="p-10 bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white shadow-2xl shadow-black/5 group hover:-translate-y-2 transition-transform duration-500">
+            <div className="p-10 bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white/40 shadow-2xl shadow-black/5 group hover:-translate-y-2 transition-transform duration-500 cursor-pointer">
               <div className="w-14 h-14 rounded-2xl bg-agency-gold/10 flex items-center justify-center mb-8">
                 <Shield className="text-agency-gold" size={28} />
               </div>
@@ -294,7 +313,7 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
         </div>
 
         {/* Billy Graham Quote - Subtle Footer */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1, duration: 1 }}
@@ -314,25 +333,108 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
 };
 
 const Partners = () => {
-  const partners = [
-    { name: 'Home Life', logo: 'https://picsum.photos/seed/h1/200/100' },
-    { name: 'Americo', logo: 'https://picsum.photos/seed/h2/200/100' },
-    { name: 'Legal & General', logo: 'https://picsum.photos/seed/h3/200/100' },
-    { name: 'Mutual of Omaha', logo: 'https://picsum.photos/seed/h4/200/100' },
+  const carriers = [
+    {
+      name: 'F&G Annuities & Life',
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/a/ad/F%26G_Annuities_%26_Life.png',
+      logoClass: 'h-12',
+    },
+    {
+      name: 'Corebridge Financial',
+      logo: 'https://www.corebridgefinancial.com/content/experience-fragments/marketing/corporate/en/corporate_site_new/header/master1/_jcr_content/root/container_1377145813/image.coreimg.svg/1686950809617/corebridge-financial-rgb-600x200.svg',
+    },
+    {
+      name: 'United Home Life',
+      logo: 'https://nsgacommunications.com/2019-logos/Carrier-Logo-Web-270x200-United-Home-Life.jpg',
+    },
+    {
+      name: 'Americo',
+      logo: 'https://www.ahcpsales.com/wp-content/uploads/2024/05/Americo-Carrier-Logo-AHCP.png',
+    },
+    {
+      name: 'Mutual of Omaha',
+      logo: 'https://cdn.mutualofomaha.com/images/corporate/logos/mutual-brand-blue.svg',
+    },
+    {
+      name: 'Banner Life',
+      logo: 'https://www.naim.com/wp-content/uploads/2020/09/banner-life.jpg',
+      logoClass: 'h-12',
+    },
+    {
+      name: 'Transamerica',
+      logo: 'https://upload.wikimedia.org/wikipedia/en/6/65/Transamerica2025Logo.svg',
+    },
+    {
+      name: 'Foresters Financial',
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Foresters_Financial_Logo.svg/3840px-Foresters_Financial_Logo.svg.png',
+    },
+    {
+      name: 'SBLI',
+      logo: 'https://www.sbli.com/wp-content/uploads/2021/05/sbli-logo.png',
+    },
+    {
+      name: 'John Hancock',
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/John_Hancock_Insurance_Logo.svg/512px-John_Hancock_Insurance_Logo.svg.png',
+    },
   ];
 
+  // Duplicate for seamless infinite marquee
+  const allCarriers = [...carriers, ...carriers];
+
   return (
-    <section className="py-20 border-y border-gray-100">
-      <div className="max-w-7xl mx-auto px-6 text-center">
-        <span className="text-[10px] uppercase tracking-[0.4em] font-bold text-agency-navy/40 mb-12 block">
+    <section className="py-20 border-y border-gray-100 overflow-hidden">
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .marquee-track {
+          display: flex;
+          width: max-content;
+          animation: marquee 30s linear infinite;
+        }
+        .marquee-track:hover {
+          animation-play-state: paused;
+        }
+      `}</style>
+      <div className="max-w-7xl mx-auto px-6 text-center mb-10">
+        <span className="text-[10px] uppercase tracking-[0.4em] font-bold text-agency-navy/40 block">
           Strategic Partners • Only A-Rated Carrier Institutions
         </span>
-        <div className="flex flex-wrap justify-center items-center gap-12 md:gap-24 opacity-40 grayscale hover:grayscale-0 transition-all">
-          {partners.map((p) => (
-            <div key={p.name} className="h-12 flex items-center justify-center font-serif text-2xl italic font-bold">
-              {p.name}
-            </div>
-          ))}
+      </div>
+      <div className="relative">
+        {/* Left fade */}
+        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-24 bg-gradient-to-r from-white to-transparent z-10" />
+        {/* Right fade */}
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-24 bg-gradient-to-l from-white to-transparent z-10" />
+        <div className="overflow-hidden">
+          <div className="marquee-track">
+            {allCarriers.map((carrier, idx) => (
+              <div
+                key={`${carrier.name}-${idx}`}
+                className="flex items-center justify-center mx-8 h-16 px-6 rounded-2xl border border-gray-100 bg-white shadow-sm hover:shadow-md hover:border-agency-gold/20 transition-all duration-300 cursor-default group"
+                style={{ minWidth: '160px' }}
+              >
+                <img
+                  src={carrier.logo}
+                  alt={carrier.name}
+                  className={`${carrier.logoClass ?? 'h-8'} w-auto object-contain grayscale group-hover:grayscale-0 opacity-50 group-hover:opacity-100 transition-all duration-300`}
+                  onError={(e) => {
+                    // Fallback to text if image fails
+                    const target = e.currentTarget;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      const span = document.createElement('span');
+                      span.className = 'text-sm font-bold text-agency-navy/40 group-hover:text-agency-navy/80 transition-colors font-serif italic';
+                      span.textContent = carrier.name;
+                      parent.appendChild(span);
+                    }
+                  }}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -358,7 +460,7 @@ const Strategies = () => {
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
           {items.map((item, idx) => (
-            <motion.div 
+            <motion.div
               key={item.title}
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -393,18 +495,18 @@ const SacredPromise = () => {
         <div className="relative">
           <div className="aspect-[4/5] rounded-[4rem] overflow-hidden border border-white/10 relative shadow-2xl bg-black/20 flex items-center justify-center">
             <div className="w-full h-[75%] relative">
-              <img 
-                src="https://lh3.googleusercontent.com/d/1YAAaGfNKACdaztW1WK1C-KPoSUPiLB9X" 
-                alt="Reupenny Family Legacy" 
+              <img
+                src="https://lh3.googleusercontent.com/d/1YAAaGfNKACdaztW1WK1C-KPoSUPiLB9X"
+                alt="Reupenny Family Legacy"
                 className="w-full h-full object-cover grayscale opacity-50 object-center transition-transform duration-1000 hover:scale-105"
                 referrerPolicy="no-referrer"
               />
               {/* Cinematic Letterbox Overlays (Subtle) */}
               <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.5)]" />
             </div>
-            
+
             <div className="absolute inset-0 bg-gradient-to-t from-agency-navy via-transparent to-transparent pointer-events-none" />
-            
+
             <div className="absolute bottom-10 left-10 right-10 bg-white p-8 rounded-2xl text-agency-navy shadow-xl">
               <span className="text-agency-gold font-bold uppercase tracking-widest text-[10px] mb-2 block">Our Why</span>
               <p className="text-xl font-serif italic">"Because family is everything."</p>
@@ -418,7 +520,7 @@ const SacredPromise = () => {
             <span className="text-agency-gold italic">Sacred Promise.</span>
           </h2>
           <p className="text-xl text-white/60 leading-relaxed mb-12">
-            When we sit down with you, we aren't just looking at spreadsheets. 
+            When we sit down with you, we aren't just looking at spreadsheets.
             We are looking at the legacy you intend to leave behind.
           </p>
           <div className="space-y-8">
@@ -453,7 +555,7 @@ const Crisis = () => {
             Are You <span className="italic">Just</span> Saving, Or Are You Building?
           </h2>
           <p className="text-lg text-agency-navy/60 leading-relaxed mb-10">
-            Traditional financial advice tells you to lock your money away for 40 years and hope the market is up when you need it. 
+            Traditional financial advice tells you to lock your money away for 40 years and hope the market is up when you need it.
             We think that's a gamble your family shouldn't have to take.
           </p>
           <ul className="space-y-6">
@@ -495,8 +597,8 @@ const LegacyGuide = () => {
           Explore how living benefits, mortgage protection, or private banking can secure your family's future.
         </p>
         <div className="relative max-w-2xl mx-auto mb-12">
-          <input 
-            type="text" 
+          <input
+            type="text"
             placeholder="E.g. How does Mortgage Protection keep my family in our home?"
             className="w-full bg-white border border-gray-100 rounded-2xl px-8 py-6 shadow-sm focus:shadow-xl transition-all outline-none pr-32"
           />
@@ -517,6 +619,13 @@ const LegacyGuide = () => {
 };
 
 const Footer = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
+  const footerLinks = [
+    { label: 'Our Philosophy', action: () => { const el = document.getElementById('philosophy'); if (el) el.scrollIntoView({ behavior: 'smooth' }); } },
+    { label: 'Career Opportunities', action: () => onNavigate('recruit') },
+    { label: 'Client Solutions', action: () => onNavigate('client') },
+    { label: 'Contact Support', action: () => onNavigate('client') },
+  ];
+
   return (
     <footer className="py-20 bg-white border-t border-gray-100">
       <div className="max-w-7xl mx-auto px-6">
@@ -529,13 +638,13 @@ const Footer = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
             </div>
           </div>
           <div className="flex flex-wrap justify-center gap-8 md:gap-12">
-            {['Our Philosophy', 'Career Opportunities', 'Legal Disclosure', 'Contact Support'].map((link) => (
-              <button 
-                key={link} 
-                onClick={() => link === 'Career Opportunities' ? onNavigate('recruit') : null}
-                className="text-[10px] font-bold uppercase tracking-[0.2em] text-agency-navy/60 hover:text-agency-gold transition-colors"
+            {footerLinks.map((link) => (
+              <button
+                key={link.label}
+                onClick={link.action}
+                className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.2em] text-agency-navy/60 hover:text-agency-gold transition-colors"
               >
-                {link}
+                {link.label}
               </button>
             ))}
           </div>
@@ -562,20 +671,24 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess }: { isOpen: boolean, onCl
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
             className="absolute inset-0 bg-agency-navy/90 backdrop-blur-sm"
           />
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             className="relative w-full max-w-md bg-white rounded-[2rem] p-12 shadow-2xl"
           >
-            <button onClick={onClose} className="absolute top-6 right-6 text-gray-400 hover:text-agency-navy transition-colors">
+            <button
+              onClick={onClose}
+              aria-label="Close login modal"
+              className="cursor-pointer absolute top-6 right-6 p-2 text-gray-400 hover:text-agency-navy hover:bg-gray-50 rounded-full transition-colors"
+            >
               <X size={24} />
             </button>
             <div className="text-center mb-10">
@@ -587,27 +700,29 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess }: { isOpen: boolean, onCl
             </div>
             <form className="space-y-6" onSubmit={handleLogin}>
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 mb-2">Agent ID / Email</label>
-                <input 
-                  type="text" 
-                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus:border-agency-gold transition-colors"
+                <label htmlFor="login-email" className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 mb-2">Agent ID / Email</label>
+                <input
+                  id="login-email"
+                  type="text"
+                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-agency-gold focus-visible:ring-offset-1 transition-colors"
                   placeholder="agent@reupenny.com"
                   required
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 mb-2">Password</label>
-                <input 
-                  type="password" 
-                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus:border-agency-gold transition-colors"
+                <label htmlFor="login-password" className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 mb-2">Password</label>
+                <input
+                  id="login-password"
+                  type="password"
+                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-agency-gold focus-visible:ring-offset-1 transition-colors"
                   placeholder="••••••••"
                   required
                 />
               </div>
-              <button type="submit" className="w-full py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all shadow-lg hover:shadow-agency-gold/20">
+              <button type="submit" className="cursor-pointer w-full py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all shadow-lg hover:shadow-agency-gold/20">
                 Sign In to Dashboard
               </button>
-              <button type="button" className="w-full text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 hover:text-agency-gold transition-colors">
+              <button type="button" className="cursor-pointer w-full text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 hover:text-agency-gold transition-colors">
                 Forgot Credentials?
               </button>
             </form>
@@ -622,7 +737,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
   const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'leads', 'sales', 'activity', 'profitability'
   const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
   const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
-  
+
   const revenueStats = [
     { label: 'Total APV Placed', value: '$118,200', icon: <CheckCircle2 size={20} />, color: 'bg-green-500' },
     { label: 'Comm. Earned (Month)', value: '$82,740', icon: <DollarSign size={20} />, color: 'bg-agency-gold' },
@@ -665,13 +780,13 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
               <span className="w-2 h-2 bg-green-500 rounded-full"></span>
               Current Contract: <span className="text-agency-gold">110%</span>
             </div>
-            <button className="p-3 bg-white rounded-xl border border-gray-100 text-agency-navy/60 hover:text-agency-gold transition-colors relative">
+            <button className="cursor-pointer p-3 bg-white rounded-xl border border-gray-100 text-agency-navy/60 hover:text-agency-gold transition-colors relative">
               <Bell size={20} />
               <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
             </button>
-            <button 
+            <button
               onClick={onLogout}
-              className="flex items-center gap-2 px-6 py-3 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-agency-gold transition-all"
+              className="cursor-pointer flex items-center gap-2 px-6 py-3 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-agency-gold transition-all"
             >
               <LogOut size={16} />
               Sign Out
@@ -691,11 +806,10 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all whitespace-nowrap ${
-                activeTab === tab.id 
-                  ? 'bg-agency-navy text-white shadow-lg shadow-agency-navy/20' 
-                  : 'bg-white text-agency-navy/40 hover:text-agency-navy border border-gray-100'
-              }`}
+              className={`cursor-pointer flex items-center gap-2 px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all whitespace-nowrap ${activeTab === tab.id
+                ? 'bg-agency-navy text-white shadow-lg shadow-agency-navy/20'
+                : 'bg-white text-agency-navy/40 hover:text-agency-navy border border-gray-100'
+                }`}
             >
               {tab.icon}
               {tab.label}
@@ -704,7 +818,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
         </div>
 
         {activeTab === 'overview' && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-8"
@@ -799,7 +913,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
         )}
 
         {activeTab === 'activity' && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="grid lg:grid-cols-2 gap-8"
@@ -853,7 +967,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
         )}
 
         {activeTab === 'leads' && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden"
@@ -861,7 +975,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
             <div className="p-8 border-b border-gray-50 flex items-center justify-between">
               <h3 className="text-xl font-bold">Lead Performance Analysis</h3>
               <div className="flex gap-2">
-                <button 
+                <button
                   onClick={() => setIsLeadModalOpen(true)}
                   className="px-4 py-2 bg-agency-gold text-white rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-agency-navy transition-colors shadow-lg shadow-agency-gold/20"
                 >
@@ -902,7 +1016,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
         )}
 
         {activeTab === 'sales' && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
@@ -918,7 +1032,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
                   <span className="text-xl font-bold">32</span>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setIsSaleModalOpen(true)}
                 className="flex items-center gap-2 px-6 py-4 bg-agency-gold text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-agency-navy transition-all shadow-lg shadow-agency-gold/20"
               >
@@ -953,9 +1067,8 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
                         </td>
                         <td className="px-8 py-6 font-bold text-agency-gold">{sale.apv}</td>
                         <td className="px-8 py-6">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
-                            sale.status === 'Placed' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
-                          }`}>
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${sale.status === 'Placed' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
+                            }`}>
                             {sale.status}
                           </span>
                         </td>
@@ -977,7 +1090,7 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
         )}
 
         {activeTab === 'profitability' && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-8"
@@ -1179,14 +1292,14 @@ const LeadSpendModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
             className="absolute inset-0 bg-agency-navy/90 backdrop-blur-sm"
           />
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1197,7 +1310,11 @@ const LeadSpendModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
                 <h2 className="text-2xl font-bold">Log Lead Investment</h2>
                 <p className="text-xs font-bold uppercase tracking-widest text-agency-navy/40 mt-1">Track your expenses to monitor ROI</p>
               </div>
-              <button onClick={onClose} className="p-2 hover:bg-gray-50 rounded-full transition-colors">
+              <button
+                onClick={onClose}
+                aria-label="Close lead investment modal"
+                className="cursor-pointer p-2 hover:bg-gray-50 rounded-full transition-colors"
+              >
                 <X size={24} />
               </button>
             </div>
@@ -1249,14 +1366,14 @@ const SaleEntryModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
             className="absolute inset-0 bg-agency-navy/90 backdrop-blur-sm"
           />
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1267,7 +1384,11 @@ const SaleEntryModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
                 <h2 className="text-2xl font-bold">New Sale Transaction</h2>
                 <p className="text-xs font-bold uppercase tracking-widest text-agency-navy/40 mt-1">Enter all metrics for accurate ROI tracking</p>
               </div>
-              <button onClick={onClose} className="p-2 hover:bg-gray-50 rounded-full transition-colors">
+              <button
+                onClick={onClose}
+                aria-label="Close sale entry modal"
+                className="cursor-pointer p-2 hover:bg-gray-50 rounded-full transition-colors"
+              >
                 <X size={24} />
               </button>
             </div>
@@ -1394,10 +1515,10 @@ const RecruitingPage = () => {
               We aren't just looking for agents. We are looking for leaders who want to revolutionize how families protect their legacies.
             </p>
             <div className="flex flex-wrap gap-6">
-              <button className="px-10 py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all">
+              <button className="cursor-pointer px-10 py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all">
                 Apply to Join
               </button>
-              <button className="px-10 py-5 border border-agency-navy/10 rounded-xl font-bold uppercase tracking-widest hover:border-agency-gold transition-all">
+              <button className="cursor-pointer px-10 py-5 border border-agency-navy/10 rounded-xl font-bold uppercase tracking-widest hover:border-agency-gold transition-all">
                 Watch Overview
               </button>
             </div>
@@ -1496,7 +1617,7 @@ const ClientPage = () => {
                   'Clear next steps for implementation.'
                 ].map((step, i) => (
                   <div key={i} className="flex gap-4 items-start">
-                    <div className="w-6 h-6 rounded-full bg-agency-gold text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-1">{i+1}</div>
+                    <div className="w-6 h-6 rounded-full bg-agency-gold text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-1">{i + 1}</div>
                     <p className="font-medium">{step}</p>
                   </div>
                 ))}
@@ -1542,10 +1663,12 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white selection:bg-agency-gold/30">
-      <Navbar 
-        onNavigate={setView} 
-        currentView={view} 
-        onLoginOpen={() => isAuthenticated ? setView('dashboard') : setIsLoginOpen(true)} 
+      {/* Skip to main content — keyboard accessibility */}
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+      <Navbar
+        onNavigate={setView}
+        currentView={view}
+        onLoginOpen={() => isAuthenticated ? setView('dashboard') : setIsLoginOpen(true)}
         isAuthenticated={isAuthenticated}
       />
 
@@ -1557,12 +1680,14 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <Hero onNavigate={setView} />
-            <Partners />
-            <Strategies />
-            <SacredPromise />
-            <Crisis />
-            <LegacyGuide />
+            <main id="main-content">
+              <Hero onNavigate={setView} />
+              <Partners />
+              <Strategies />
+              <SacredPromise />
+              <Crisis />
+              <LegacyGuide />
+            </main>
           </motion.div>
         )}
 
@@ -1601,9 +1726,9 @@ export default function App() {
       </AnimatePresence>
 
       {view !== 'dashboard' && <Footer onNavigate={setView} />}
-      <LoginModal 
-        isOpen={isLoginOpen} 
-        onClose={() => setIsLoginOpen(false)} 
+      <LoginModal
+        isOpen={isLoginOpen}
+        onClose={() => setIsLoginOpen(false)}
         onLoginSuccess={handleLoginSuccess}
       />
     </div>
