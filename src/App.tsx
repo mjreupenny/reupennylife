@@ -48,7 +48,14 @@ import {
   Zap,
   ArrowUpRight,
   ArrowDownRight,
-  Sparkles
+  Sparkles,
+  Crown,
+  UserCheck,
+  UserX,
+  UserMinus,
+  Activity,
+  ClipboardList,
+  BadgeCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleLogin } from '@react-oauth/google';
@@ -60,12 +67,20 @@ interface User {
   name: string;
   email: string;
   picture?: string;
+  isAdmin?: boolean;
 }
+
+// --- Admin Config ---
+const ADMIN_EMAILS = new Set([
+  'sfg.miller.reupenny@gmail.com',
+  'sfg.seta.reupenny@gmail.com',
+]);
 
 /** Decode a Google JWT credential (client-side only — no verification needed here) */
 const decodeGoogleJwt = (token: string): User => {
   const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-  return { name: payload.name ?? payload.email, email: payload.email, picture: payload.picture };
+  const email = payload.email as string;
+  return { name: payload.name ?? email, email, picture: payload.picture, isAdmin: ADMIN_EMAILS.has(email) };
 };
 
 // --- Components ---
@@ -917,38 +932,401 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess, onGoogleSuccess }: {
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// TIME PERIOD — Types, Helpers, Mock Data, Hook, Selector UI
+// ─────────────────────────────────────────────────────────────
+
+type PeriodMode = 'week' | 'month' | 'quarter' | 'custom';
+type WeekDuration = 1 | 2 | 3 | 4 | 6;
+
+interface TimeRange {
+  mode: PeriodMode;
+  startDate: Date;
+  endDate: Date;
+  label: string;
+  days: number;
+  weekDuration?: WeekDuration; // only for week mode
+}
+
+// ── Date helpers ──────────────────────────────────────────────
+
+const startOfDay = (d: Date) => { const r = new Date(d); r.setHours(0, 0, 0, 0); return r; };
+const endOfDay = (d: Date) => { const r = new Date(d); r.setHours(23, 59, 59, 999); return r; };
+const addDays = (d: Date, n: number) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+const addMonths = (d: Date, n: number) => { const r = new Date(d); r.setMonth(r.getMonth() + n); return r; };
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function buildMonthRange(year: number, month: number): TimeRange {
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 0); // last day of month
+  const days = end.getDate();
+  return {
+    mode: 'month', startDate: startOfDay(start), endDate: endOfDay(end), days,
+    label: `${MONTH_NAMES[month]} ${year}`
+  };
+}
+
+function buildQuarterRange(year: number, q: number): TimeRange {
+  const startMonth = (q - 1) * 3;
+  const start = new Date(year, startMonth, 1);
+  const end = new Date(year, startMonth + 3, 0);
+  const days = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  return {
+    mode: 'quarter', startDate: startOfDay(start), endDate: endOfDay(end), days,
+    label: `Q${q} ${year}`
+  };
+}
+
+function buildWeekRange(anchorStart: Date, duration: WeekDuration): TimeRange {
+  const start = startOfDay(anchorStart);
+  const days = duration * 7;
+  const end = endOfDay(addDays(start, days - 1));
+  const fmt = (d: Date) => `${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}`;
+  return {
+    mode: 'week', startDate: start, endDate: end, days, weekDuration: duration,
+    label: `${fmt(start)} – ${fmt(end)}, ${start.getFullYear()}`
+  };
+}
+
+function buildCustomRange(start: Date, end: Date): TimeRange {
+  const s = startOfDay(start);
+  const e = endOfDay(end);
+  const days = Math.max(1, Math.round((e.getTime() - s.getTime()) / 86400000) + 1);
+  const fmt = (d: Date) => `${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  return { mode: 'custom', startDate: s, endDate: e, days, label: `${fmt(s)} – ${fmt(e)}` };
+}
+
+function defaultRange(): TimeRange {
+  const now = new Date();
+  return buildMonthRange(now.getFullYear(), now.getMonth());
+}
+
+function inRange(dateStr: string, range: TimeRange): boolean {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d >= range.startDate && d <= range.endDate;
+}
+
+// ── Mock Data ─────────────────────────────────────────────────
+
+interface SaleRecord {
+  id: string;
+  agentId: string;
+  apv: number;
+  status: 'Submitted' | 'Placed';
+  submittedDate: string;
+  placedDate?: string;
+  commRate: number;
+}
+
+interface ActivityRecord {
+  agentId: string;
+  date: string;
+  dials: number;
+  contacts: number;
+  bookedAppts: number;
+  apptsRun: number;
+  presentations: number;
+  sales: number;
+}
+
+// Seeded pseudo-random (deterministic by index so data is stable)
+const seededRnd = (seed: number, min: number, max: number) => {
+  const x = Math.sin(seed) * 10000;
+  return Math.floor((x - Math.floor(x)) * (max - min + 1) + min);
+};
+
+// Generate ~18 months of weekly activity for each agent (Oct 2024 – Mar 2026)
+const AGENT_IDS = ['A-001', 'A-002', 'A-003', 'A-004', 'A-005', 'A-006'];
+const AGENT_DAILY_DIALS: Record<string, number> = {
+  'A-001': 30, 'A-002': 22, 'A-003': 15, 'A-004': 8, 'A-005': 42, 'A-006': 10,
+};
+const AGENT_JOIN_DATES: Record<string, string> = {
+  'A-001': '2024-11-01', 'A-002': '2024-12-15', 'A-003': '2025-01-08',
+  'A-004': '2025-01-22', 'A-005': '2024-10-05', 'A-006': '2024-09-14',
+};
+
+const MOCK_ACTIVITY: ActivityRecord[] = (() => {
+  const records: ActivityRecord[] = [];
+  let seed = 1;
+  const startDate = new Date('2024-09-14');
+  const endDate = new Date('2026-03-31');
+  for (let d = new Date(startDate); d <= endDate; d = addDays(d, 7)) {
+    for (const aid of AGENT_IDS) {
+      const joinDate = new Date(AGENT_JOIN_DATES[aid] + 'T00:00:00');
+      if (d < joinDate) continue;
+      const base = AGENT_DAILY_DIALS[aid] * 5; // weekly
+      const dials = seededRnd(seed++, Math.floor(base * 0.8), Math.floor(base * 1.2));
+      const contacts = seededRnd(seed++, Math.floor(dials * 0.15), Math.floor(dials * 0.22));
+      const booked = seededRnd(seed++, Math.floor(contacts * 0.25), Math.floor(contacts * 0.32));
+      const run = seededRnd(seed++, Math.floor(booked * 0.7), booked);
+      const pres = seededRnd(seed++, Math.floor(run * 0.7), run);
+      const sales = seededRnd(seed++, Math.floor(pres * 0.6), Math.floor(pres * 0.85));
+      records.push({ agentId: aid, date: isoDate(d), dials, contacts, bookedAppts: booked, apptsRun: run, presentations: pres, sales });
+    }
+  }
+  return records;
+})();
+
+const MOCK_SALES: SaleRecord[] = (() => {
+  const records: SaleRecord[] = [];
+  let id = 1;
+  let seed = 500;
+  // Generate from activity data — each "sale" in activity creates 1 SaleRecord
+  for (const act of MOCK_ACTIVITY) {
+    for (let s = 0; s < act.sales; s++) {
+      const apv = seededRnd(seed++, 1400, 5200);
+      const commRate = seededRnd(seed++, 0, 1) === 0 ? 110 : 115;
+      const subDate = act.date;
+      // ~80% placed within 10-18 days
+      const placed = seededRnd(seed++, 0, 4) > 0;
+      const placedDate = placed ? isoDate(addDays(new Date(subDate + 'T12:00:00'), seededRnd(seed++, 10, 18))) : undefined;
+      records.push({
+        id: `S-${String(id++).padStart(4, '0')}`, agentId: act.agentId, apv, commRate,
+        status: placed ? 'Placed' : 'Submitted', submittedDate: subDate, placedDate
+      });
+    }
+  }
+  return records;
+})();
+
+// ── Dashboard Metrics Hook ────────────────────────────────────
+
+interface DashboardMetrics {
+  apvSubmitted: number;
+  apvPlaced: number;
+  commEarned: number;
+  avgApvPerApp: number;
+  appCount: number;
+  dials: number;
+  contacts: number;
+  bookedAppts: number;
+  apptsRun: number;
+  presentations: number;
+  salesCount: number;
+  // Admin
+  activeAgentsCount: number;
+  newAgentsInPeriod: number;
+  agentJoinedInPeriod: (agentId: string) => boolean;
+}
+
+function useDashboardMetrics(range: TimeRange, agentIds?: string[]): DashboardMetrics {
+  const ids = agentIds ?? AGENT_IDS;
+
+  const sales = MOCK_SALES.filter(r => ids.includes(r.agentId));
+  const activity = MOCK_ACTIVITY.filter(r => ids.includes(r.agentId));
+
+  const submitted = sales.filter(r => inRange(r.submittedDate, range));
+  const placed = sales.filter(r => r.placedDate && inRange(r.placedDate, range));
+
+  const apvSubmitted = submitted.reduce((s, r) => s + r.apv, 0);
+  const apvPlaced = placed.reduce((s, r) => s + r.apv, 0);
+  const commEarned = placed.reduce((s, r) => s + r.apv * (r.commRate / 100), 0);
+  const appCount = submitted.length;
+  const avgApvPerApp = appCount > 0 ? apvSubmitted / appCount : 0;
+
+  const acts = activity.filter(r => inRange(r.date, range));
+  const dials = acts.reduce((s, r) => s + r.dials, 0);
+  const contacts = acts.reduce((s, r) => s + r.contacts, 0);
+  const bookedAppts = acts.reduce((s, r) => s + r.bookedAppts, 0);
+  const apptsRun = acts.reduce((s, r) => s + r.apptsRun, 0);
+  const presentations = acts.reduce((s, r) => s + r.presentations, 0);
+  const salesCount = acts.reduce((s, r) => s + r.sales, 0);
+
+  const activeAgentsCount = ids.filter(id => {
+    const jd = AGENT_JOIN_DATES[id];
+    return jd && new Date(jd + 'T00:00:00') <= range.endDate;
+  }).length;
+
+  const newAgentsInPeriod = ids.filter(id => {
+    const jd = AGENT_JOIN_DATES[id];
+    return jd && inRange(jd, range);
+  }).length;
+
+  const agentJoinedInPeriod = (agentId: string) => {
+    const jd = AGENT_JOIN_DATES[agentId];
+    return !!jd && inRange(jd, range);
+  };
+
+  return {
+    apvSubmitted, apvPlaced, commEarned, avgApvPerApp, appCount,
+    dials, contacts, bookedAppts, apptsRun, presentations, salesCount,
+    activeAgentsCount, newAgentsInPeriod, agentJoinedInPeriod
+  };
+}
+
+// ── Currency & number formatters ──────────────────────────────
+
+const fmtCurrency = (n: number) =>
+  n >= 1000000 ? `$${(n / 1000000).toFixed(1)}M`
+    : n >= 1000 ? `$${(n / 1000).toFixed(1)}K`
+      : `$${Math.round(n).toLocaleString()}`;
+
+const fmtNum = (n: number) =>
+  n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(Math.round(n));
+
+// ── PeriodSelector Component ──────────────────────────────────
+
+const PeriodSelector = ({ range, onChange }: { range: TimeRange; onChange: (r: TimeRange) => void }) => {
+  const [customStart, setCustomStart] = useState(isoDate(range.startDate));
+  const [customEnd, setCustomEnd] = useState(isoDate(range.endDate));
+
+  // Derive current month/quarter/week state from range
+  const curYear = range.startDate.getFullYear();
+  const curMonth = range.startDate.getMonth();
+  const curQ = Math.floor(curMonth / 3) + 1;
+
+  const switchMode = (mode: PeriodMode) => {
+    const now = new Date();
+    if (mode === 'month') return onChange(buildMonthRange(now.getFullYear(), now.getMonth()));
+    if (mode === 'quarter') return onChange(buildQuarterRange(now.getFullYear(), Math.floor(now.getMonth() / 3) + 1));
+    if (mode === 'week') {
+      const mon = new Date(now); mon.setDate(mon.getDate() - mon.getDay() + 1);
+      return onChange(buildWeekRange(mon, 1));
+    }
+    if (mode === 'custom') return onChange(buildCustomRange(range.startDate, range.endDate));
+  };
+
+  const navMonth = (dir: -1 | 1) => onChange(buildMonthRange(curYear, curMonth + dir));
+  const navQuarter = (dir: -1 | 1) => {
+    const newQ = curQ + dir;
+    if (newQ < 1) return onChange(buildQuarterRange(curYear - 1, 4));
+    if (newQ > 4) return onChange(buildQuarterRange(curYear + 1, 1));
+    return onChange(buildQuarterRange(curYear, newQ));
+  };
+  const navWeek = (dir: -1 | 1) => {
+    const dur = range.weekDuration ?? 1;
+    const newStart = addDays(range.startDate, dir * dur * 7);
+    return onChange(buildWeekRange(newStart, dur));
+  };
+
+  const MODES: { id: PeriodMode; label: string }[] = [
+    { id: 'week', label: 'Week' }, { id: 'month', label: 'Month' },
+    { id: 'quarter', label: 'Quarter' }, { id: 'custom', label: 'Custom' },
+  ];
+  const WEEK_DURATIONS: WeekDuration[] = [1, 2, 3, 4, 6];
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-4 mb-8 flex flex-wrap items-center gap-4">
+      {/* Mode Tabs */}
+      <div className="flex items-center gap-1 bg-gray-50 rounded-xl p-1">
+        {MODES.map(m => (
+          <button key={m.id} onClick={() => switchMode(m.id)}
+            className={`cursor-pointer px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${range.mode === m.id ? 'bg-agency-navy text-white shadow-sm' : 'text-agency-navy/40 hover:text-agency-navy'
+              }`}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Week sub-controls */}
+      {range.mode === 'week' && (
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-gray-50 rounded-xl p-1">
+            {WEEK_DURATIONS.map(d => (
+              <button key={d} onClick={() => onChange(buildWeekRange(range.startDate, d))}
+                className={`cursor-pointer px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${range.weekDuration === d ? 'bg-agency-gold text-white' : 'text-agency-navy/40 hover:text-agency-navy'
+                  }`}>
+                {d}wk
+              </button>
+            ))}
+          </div>
+          <button onClick={() => navWeek(-1)} className="cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition-colors text-agency-navy/60">‹</button>
+          <span className="text-sm font-bold text-agency-navy min-w-[180px] text-center">{range.label}</span>
+          <button onClick={() => navWeek(1)} className="cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition-colors text-agency-navy/60">›</button>
+        </div>
+      )}
+
+      {/* Month sub-controls */}
+      {range.mode === 'month' && (
+        <div className="flex items-center gap-2">
+          <button onClick={() => navMonth(-1)} className="cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition-colors text-agency-navy/60">‹</button>
+          <span className="text-sm font-bold text-agency-navy min-w-[160px] text-center">{range.label}</span>
+          <button onClick={() => navMonth(1)} className="cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition-colors text-agency-navy/60">›</button>
+        </div>
+      )}
+
+      {/* Quarter sub-controls */}
+      {range.mode === 'quarter' && (
+        <div className="flex items-center gap-2">
+          <button onClick={() => navQuarter(-1)} className="cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition-colors text-agency-navy/60">‹</button>
+          <div className="flex items-center gap-1 bg-gray-50 rounded-xl p-1">
+            {([1, 2, 3, 4] as const).map(q => (
+              <button key={q} onClick={() => onChange(buildQuarterRange(curYear, q))}
+                className={`cursor-pointer px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${curQ === q && range.mode === 'quarter' ? 'bg-agency-navy text-white' : 'text-agency-navy/40 hover:text-agency-navy'
+                  }`}>
+                Q{q}
+              </button>
+            ))}
+          </div>
+          <span className="text-sm font-bold text-agency-navy">{curYear}</span>
+          <button onClick={() => navQuarter(1)} className="cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition-colors text-agency-navy/60">›</button>
+        </div>
+      )}
+
+      {/* Custom sub-controls */}
+      {range.mode === 'custom' && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">From</label>
+            <input type="date" value={customStart}
+              onChange={e => { setCustomStart(e.target.value); if (e.target.value <= customEnd) onChange(buildCustomRange(new Date(e.target.value), new Date(customEnd))); }}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium outline-none focus:border-agency-gold transition-colors" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">To</label>
+            <input type="date" value={customEnd}
+              onChange={e => { setCustomEnd(e.target.value); if (customStart <= e.target.value) onChange(buildCustomRange(new Date(customStart), new Date(e.target.value))); }}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium outline-none focus:border-agency-gold transition-colors" />
+          </div>
+          <span className="text-xs text-agency-navy/40 font-medium">{range.days} days</span>
+        </div>
+      )}
+
+      {/* Days count badge (always shown) */}
+      <span className="ml-auto text-[10px] font-bold uppercase tracking-widest text-agency-navy/30 bg-gray-50 px-3 py-1 rounded-full">
+        {range.days} {range.days === 1 ? 'day' : 'days'}
+      </span>
+    </div>
+  );
+};
+
 const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'leads', 'sales', 'activity', 'profitability'
+  const [activeTab, setActiveTab] = useState('overview');
   const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
   const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
+  const [range, setRange] = useState<TimeRange>(defaultRange);
+
+  // Use only A-001 as the "current agent" for the individual dashboard
+  const m = useDashboardMetrics(range, ['A-001']);
 
   const revenueStats = [
-    { label: 'Total APV Placed', value: '$118,200', icon: <CheckCircle2 size={20} />, color: 'bg-green-500' },
-    { label: 'Comm. Earned (Month)', value: '$82,740', icon: <DollarSign size={20} />, color: 'bg-agency-gold' },
-    { label: 'Comm. Earned (Week)', value: '$18,450', icon: <Zap size={20} />, color: 'bg-yellow-500' },
-    { label: 'Avg APV per App', value: '$2,450', icon: <TrendingUp size={20} />, color: 'bg-blue-500' },
+    { label: 'APV Placed', value: fmtCurrency(m.apvPlaced), icon: <CheckCircle2 size={20} />, color: 'bg-green-500' },
+    { label: 'Comm. Earned', value: fmtCurrency(m.commEarned), icon: <DollarSign size={20} />, color: 'bg-agency-gold' },
+    { label: 'APV Submitted', value: fmtCurrency(m.apvSubmitted), icon: <Zap size={20} />, color: 'bg-yellow-500' },
+    { label: 'Avg APV / App', value: fmtCurrency(m.avgApvPerApp), icon: <TrendingUp size={20} />, color: 'bg-blue-500' },
   ];
 
   const activityFunnel = [
-    { label: 'Dials', value: '842', icon: <Phone size={18} /> },
-    { label: 'Contacts', value: '156', icon: <PhoneCall size={18} /> },
-    { label: 'Booked Appts', value: '42', icon: <Target size={18} /> },
-    { label: 'Appts Run', value: '31', icon: <CheckSquare size={18} /> },
-    { label: 'Presentations', value: '24', icon: <Presentation size={18} /> },
-    { label: 'Sales', value: '18', icon: <DollarSign size={18} /> },
+    { label: 'Dials', value: fmtNum(m.dials), icon: <Phone size={18} /> },
+    { label: 'Contacts', value: fmtNum(m.contacts), icon: <PhoneCall size={18} /> },
+    { label: 'Booked Appts', value: fmtNum(m.bookedAppts), icon: <Target size={18} /> },
+    { label: 'Appts Run', value: fmtNum(m.apptsRun), icon: <CheckSquare size={18} /> },
+    { label: 'Presentations', value: fmtNum(m.presentations), icon: <Presentation size={18} /> },
+    { label: 'Sales', value: fmtNum(m.salesCount), icon: <DollarSign size={18} /> },
   ];
 
-  const leadMetrics = [
-    { type: 'Direct Mail', source: 'LeadCo', count: 45, apv: '$3,200', cac: '$120', date: '2024-02-15' },
-    { type: 'Digital IUL', source: 'Facebook', count: 82, apv: '$2,100', cac: '$85', date: '2024-02-17' },
-    { type: 'Final Expense', source: 'TV', count: 28, apv: '$1,200', cac: '$45', date: '2024-02-10' },
-  ];
+  // Sales ledger — show MOCK_SALES for this agent filtered by submitted date in range (up to 15)
+  const agentSales = MOCK_SALES
+    .filter(r => r.agentId === 'A-001' && inRange(r.submittedDate, range))
+    .slice(-15)
+    .reverse();
 
-  const recentSales = [
-    { id: 'S-1001', client: 'John Doe', apv: '$3,500', status: 'Placed', dateSub: '2024-02-01', datePlaced: '2024-02-10', comm: '110%' },
-    { id: 'S-1002', client: 'Jane Smith', apv: '$2,800', status: 'Submitted', dateSub: '2024-02-12', datePlaced: '-', comm: '115%' },
-    { id: 'S-1003', client: 'Bob Wilson', apv: '$4,200', status: 'Placed', dateSub: '2024-01-25', datePlaced: '2024-02-05', comm: '110%' },
-  ];
+  // Lead metrics — derived from range metrics
+  const leadSpend = m.appCount * 85; // ~$85 CAC
+  const roi = leadSpend > 0 ? m.commEarned / leadSpend : 0;
 
   return (
     <div className="min-h-screen bg-gray-50 pt-24 pb-12">
@@ -977,6 +1355,9 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
             </button>
           </div>
         </div>
+
+        {/* Period Selector */}
+        <PeriodSelector range={range} onChange={setRange} />
 
         {/* Tab Navigation */}
         <div className="flex items-center gap-4 mb-8 overflow-x-auto pb-2 scrollbar-hide">
@@ -1183,11 +1564,15 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {leadMetrics.map((lead, i) => (
+                  {[
+                    { type: 'Direct Mail', source: 'LeadCo', count: Math.round(m.appCount * 0.29), apv: fmtCurrency(m.avgApvPerApp * 1.1), cac: '$120' },
+                    { type: 'Digital IUL', source: 'Facebook', count: Math.round(m.appCount * 0.51), apv: fmtCurrency(m.avgApvPerApp), cac: '$85' },
+                    { type: 'Final Expense', source: 'TV', count: Math.round(m.appCount * 0.20), apv: fmtCurrency(m.avgApvPerApp * 0.7), cac: '$45' },
+                  ].map((lead, i) => (
                     <tr key={i} className="hover:bg-gray-50 transition-colors">
                       <td className="px-8 py-6 font-bold">{lead.type}</td>
                       <td className="px-8 py-6 text-sm text-agency-navy/60">{lead.source}</td>
-                      <td className="px-8 py-6 text-sm text-agency-navy/60">{lead.date}</td>
+                      <td className="px-8 py-6 text-sm text-agency-navy/60">{range.label}</td>
                       <td className="px-8 py-6 font-bold text-agency-gold">{lead.count}</td>
                       <td className="px-8 py-6 font-bold">{lead.apv}</td>
                       <td className="px-8 py-6 text-sm font-medium text-red-500">{lead.cac}</td>
@@ -1208,12 +1593,12 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
             <div className="flex justify-between items-center">
               <div className="flex gap-4">
                 <div className="bg-white px-6 py-3 rounded-xl border border-gray-100 shadow-sm">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 block mb-1">Apps this Week</span>
-                  <span className="text-xl font-bold">8</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 block mb-1">Apps ({range.label})</span>
+                  <span className="text-xl font-bold">{m.appCount}</span>
                 </div>
                 <div className="bg-white px-6 py-3 rounded-xl border border-gray-100 shadow-sm">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 block mb-1">Apps this Month</span>
-                  <span className="text-xl font-bold">32</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 block mb-1">APV Submitted</span>
+                  <span className="text-xl font-bold">{fmtCurrency(m.apvSubmitted)}</span>
                 </div>
               </div>
               <button
@@ -1243,26 +1628,24 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {recentSales.map((sale) => (
+                    {agentSales.length === 0 ? (
+                      <tr><td colSpan={6} className="px-8 py-12 text-center text-agency-navy/30 text-sm">No apps submitted in this period.</td></tr>
+                    ) : agentSales.map((sale) => (
                       <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-8 py-6">
-                          <div className="font-bold">{sale.client}</div>
-                          <div className="text-[10px] text-agency-navy/30">{sale.id}</div>
+                          <div className="font-bold font-mono text-sm">{sale.id}</div>
+                          <div className="text-[10px] text-agency-navy/30">Policy App</div>
                         </td>
-                        <td className="px-8 py-6 font-bold text-agency-gold">{sale.apv}</td>
+                        <td className="px-8 py-6 font-bold text-agency-gold">{fmtCurrency(sale.apv)}</td>
                         <td className="px-8 py-6">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${sale.status === 'Placed' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
-                            }`}>
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${sale.status === 'Placed' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>
                             {sale.status}
                           </span>
                         </td>
-                        <td className="px-8 py-6 text-sm text-agency-navy/60">{sale.dateSub}</td>
-                        <td className="px-8 py-6 text-sm text-agency-navy/60">{sale.datePlaced}</td>
+                        <td className="px-8 py-6 text-sm text-agency-navy/60">{sale.submittedDate}</td>
+                        <td className="px-8 py-6 text-sm text-agency-navy/60">{sale.placedDate ?? '—'}</td>
                         <td className="px-8 py-6">
-                          <button className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-agency-gold/10 hover:text-agency-gold rounded-lg transition-all group">
-                            <span className="font-bold">{sale.comm}</span>
-                            <Edit2 size={12} className="opacity-0 group-hover:opacity-100" />
-                          </button>
+                          <span className="font-bold">{sale.commRate}%</span>
                         </td>
                       </tr>
                     ))}
@@ -1292,21 +1675,21 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
                 <div className="grid md:grid-cols-2 gap-12">
                   <div className="space-y-8">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 mb-4">Weekly Lead Spend</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 mb-4">Lead Spend ({range.label})</label>
                       <div className="flex items-center gap-4">
-                        <input type="text" defaultValue="$1,250" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-6 py-4 font-bold text-xl outline-none focus:border-agency-gold transition-all" />
+                        <input type="text" value={fmtCurrency(leadSpend)} readOnly className="w-full bg-gray-50 border border-gray-100 rounded-xl px-6 py-4 font-bold text-xl outline-none" />
                       </div>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 mb-4">Weekly Comm. Earned</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 mb-4">Comm. Earned ({range.label})</label>
                       <div className="flex items-center gap-4">
-                        <input type="text" defaultValue="$18,450" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-6 py-4 font-bold text-xl outline-none focus:border-agency-gold transition-all" />
+                        <input type="text" value={fmtCurrency(m.commEarned)} readOnly className="w-full bg-gray-50 border border-gray-100 rounded-xl px-6 py-4 font-bold text-xl outline-none" />
                       </div>
                     </div>
                     <div className="pt-6">
                       <div className="p-6 bg-agency-navy text-white rounded-2xl">
-                        <div className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-2">Net Profit (Weekly)</div>
-                        <div className="text-3xl font-bold text-agency-gold">$17,200</div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-2">Net Profit ({range.label})</div>
+                        <div className="text-3xl font-bold text-agency-gold">{fmtCurrency(m.commEarned - leadSpend)}</div>
                       </div>
                     </div>
                   </div>
@@ -1319,8 +1702,10 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
                         <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" strokeDasharray={552} strokeDashoffset={552 * (1 - 0.85)} className="text-green-500 transition-all duration-1000" />
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-4xl font-bold">1:14.7</span>
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-green-500 mt-1">Elite Status</span>
+                        <span className="text-4xl font-bold">{roi >= 1 ? `1:${roi.toFixed(1)}` : `${roi.toFixed(2)}:1`}</span>
+                        <span className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${roi >= 3 ? 'text-green-500' : roi >= 1 ? 'text-yellow-500' : 'text-red-500'}`}>
+                          {roi >= 5 ? 'Elite Status' : roi >= 3 ? 'On Target' : roi >= 1 ? 'Caution' : 'Critical'}
+                        </span>
                       </div>
                     </div>
                     <p className="text-sm text-agency-navy/60 leading-relaxed">
@@ -1462,6 +1847,516 @@ const AgentDashboard = ({ onLogout }: { onLogout: () => void }) => {
         <SaleEntryModal isOpen={isSaleModalOpen} onClose={() => setIsSaleModalOpen(false)} />
         <LeadSpendModal isOpen={isLeadModalOpen} onClose={() => setIsLeadModalOpen(false)} />
       </div>
+    </div>
+  );
+};
+
+// --- Admin Dashboard ---
+
+type AgentStatus = 'Active' | 'Pending' | 'Suspended';
+
+interface ManagedAgent {
+  id: string;
+  name: string;
+  email: string;
+  joinDate: string;
+  apvSubmitted: string;
+  apvPlaced: string;
+  apps: number;
+  status: AgentStatus;
+}
+
+const INITIAL_AGENTS: ManagedAgent[] = [
+  { id: 'A-001', name: 'Jordan Mitchell', email: 'jordan.m@example.com', joinDate: '2024-11-01', apvSubmitted: '$42,800', apvPlaced: '$38,500', apps: 14, status: 'Active' },
+  { id: 'A-002', name: 'Priya Kapoor', email: 'priya.k@example.com', joinDate: '2024-12-15', apvSubmitted: '$28,100', apvPlaced: '$22,400', apps: 10, status: 'Active' },
+  { id: 'A-003', name: 'Marcus Webb', email: 'marcus.w@example.com', joinDate: '2025-01-08', apvSubmitted: '$11,200', apvPlaced: '$0', apps: 4, status: 'Pending' },
+  { id: 'A-004', name: 'Tanya Rivers', email: 'tanya.r@example.com', joinDate: '2025-01-22', apvSubmitted: '$0', apvPlaced: '$0', apps: 0, status: 'Pending' },
+  { id: 'A-005', name: 'Derek Chase', email: 'derek.c@example.com', joinDate: '2024-10-05', apvSubmitted: '$67,500', apvPlaced: '$61,200', apps: 22, status: 'Active' },
+  { id: 'A-006', name: 'Simone Ortega', email: 'simone.o@example.com', joinDate: '2024-09-14', apvSubmitted: '$5,300', apvPlaced: '$2,100', apps: 3, status: 'Suspended' },
+];
+
+const AdminDashboard = ({ onLogout, user }: { onLogout: () => void; user?: User }) => {
+  const [activeTab, setActiveTab] = useState('overview');
+  const [agents, setAgents] = useState<ManagedAgent[]>(INITIAL_AGENTS);
+  const [confirmAction, setConfirmAction] = useState<{ agentId: string; action: 'approve' | 'decline' | 'remove' } | null>(null);
+  const [range, setRange] = useState<TimeRange>(defaultRange);
+
+  // Agency-wide metrics for the selected range
+  const ma = useDashboardMetrics(range);
+
+  const activeCount = agents.filter(a => a.status === 'Active').length;
+  const pendingCount = agents.filter(a => a.status === 'Pending').length;
+
+  // Per-agent profitability in the selected range (no React hooks in a loop — pure computation)
+  const agentProfitability = agents.map(agent => {
+    const sales = MOCK_SALES.filter(r => r.agentId === agent.id);
+    const activity = MOCK_ACTIVITY.filter(r => r.agentId === agent.id);
+    const submitted = sales.filter(r => inRange(r.submittedDate, range));
+    const placed = sales.filter(r => r.placedDate && inRange(r.placedDate, range));
+    const apvSub = submitted.reduce((s, r) => s + r.apv, 0);
+    const apvPla = placed.reduce((s, r) => s + r.apv, 0);
+    const comm = placed.reduce((s, r) => s + r.apv * (r.commRate / 100), 0);
+    const apps = submitted.length;
+    const actRecs = activity.filter(r => inRange(r.date, range));
+    const dials = actRecs.reduce((s, r) => s + r.dials, 0);
+    const leadSpend = apps * 85;
+    const roi = leadSpend > 0 ? comm / leadSpend : 0;
+    const health = roi === 0 ? 'none' : roi >= 3 ? 'good' : roi >= 1 ? 'caution' : 'risk';
+    return { agentId: agent.id, apvSub, apvPla, comm, apps, dials, leadSpend, roi, health };
+  });
+
+  const agencyStats = [
+    { label: 'Active Agents (Period)', value: ma.activeAgentsCount.toString(), icon: <BadgeCheck size={20} />, color: 'bg-green-500' },
+    { label: 'New Agents This Period', value: ma.newAgentsInPeriod.toString(), icon: <Users size={20} />, color: 'bg-agency-navy' },
+    { label: 'APV Submitted', value: fmtCurrency(ma.apvSubmitted), icon: <ClipboardList size={20} />, color: 'bg-agency-gold' },
+    { label: 'APV Placed', value: fmtCurrency(ma.apvPlaced), icon: <CheckCircle2 size={20} />, color: 'bg-blue-500' },
+  ];
+
+  const agencyActivity = [
+    { label: 'Total Dials', value: fmtNum(ma.dials), icon: <Phone size={18} /> },
+    { label: 'Total Contacts', value: fmtNum(ma.contacts), icon: <PhoneCall size={18} /> },
+    { label: 'Booked Appts', value: fmtNum(ma.bookedAppts), icon: <Target size={18} /> },
+    { label: 'Appts Run', value: fmtNum(ma.apptsRun), icon: <CheckSquare size={18} /> },
+    { label: 'Presentations', value: fmtNum(ma.presentations), icon: <Presentation size={18} /> },
+    { label: 'Total Sales', value: fmtNum(ma.salesCount), icon: <DollarSign size={18} /> },
+  ];
+
+  const statusBadge = (status: AgentStatus) => {
+    const map: Record<AgentStatus, string> = {
+      Active: 'bg-green-100 text-green-700',
+      Pending: 'bg-amber-100 text-amber-700',
+      Suspended: 'bg-red-100 text-red-600',
+    };
+    return map[status];
+  };
+
+  const handleAction = (agentId: string, action: 'approve' | 'decline' | 'remove') => {
+    setAgents(prev => {
+      if (action === 'remove') return prev.filter(a => a.id !== agentId);
+      if (action === 'approve') return prev.map(a => a.id === agentId ? { ...a, status: 'Active' as AgentStatus } : a);
+      if (action === 'decline') return prev.map(a => a.id === agentId ? { ...a, status: 'Suspended' as AgentStatus } : a);
+      return prev;
+    });
+    setConfirmAction(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 pt-24 pb-12">
+      <div className="max-w-7xl mx-auto px-6">
+
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 bg-agency-gold rounded-lg flex items-center justify-center">
+                <Crown size={16} className="text-white" />
+              </div>
+              <h1 className="text-4xl font-bold">Admin Command Center</h1>
+            </div>
+            <p className="text-agency-navy/50 font-medium ml-11">Agency-level oversight · No client data displayed</p>
+          </div>
+          <div className="flex items-center gap-4">
+            {user?.picture ? (
+              <img src={user.picture} alt={user.name} className="w-9 h-9 rounded-full object-cover border-2 border-agency-gold" referrerPolicy="no-referrer" />
+            ) : null}
+            <div className="hidden lg:block px-4 py-2 bg-agency-gold/10 rounded-xl border border-agency-gold/20">
+              <span className="text-xs font-bold uppercase tracking-widest text-agency-gold">Admin Access</span>
+            </div>
+            <button
+              onClick={onLogout}
+              className="cursor-pointer flex items-center gap-2 px-6 py-3 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-agency-gold transition-all"
+            >
+              <LogOut size={16} />
+              Sign Out
+            </button>
+          </div>
+        </div>
+
+        {/* Period Selector */}
+        <PeriodSelector range={range} onChange={setRange} />
+
+        {/* Tab Navigation */}
+        <div className="flex items-center gap-4 mb-8 overflow-x-auto pb-2">
+          {[
+            { id: 'overview', label: 'Agency Overview', icon: <LayoutDashboard size={16} /> },
+            { id: 'activity', label: 'Activity Report', icon: <Activity size={16} /> },
+            { id: 'agents', label: 'Agent Management', icon: <Users size={16} /> },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`cursor-pointer flex items-center gap-2 px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all whitespace-nowrap ${activeTab === tab.id
+                ? 'bg-agency-navy text-white shadow-lg shadow-agency-navy/20'
+                : 'bg-white text-agency-navy/40 hover:text-agency-navy border border-gray-100'
+                }`}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ─── OVERVIEW TAB ─── */}
+        {activeTab === 'overview' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+            {/* Agency KPI Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {agencyStats.map((stat) => (
+                <div key={stat.label} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
+                  <div className={`w-12 h-12 ${stat.color} rounded-2xl flex items-center justify-center text-white mb-6`}>
+                    {stat.icon}
+                  </div>
+                  <div className="text-3xl font-bold mb-1">{stat.value}</div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">{stat.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* APV Summary */}
+            <div className="grid lg:grid-cols-2 gap-8">
+              <div className="bg-agency-navy text-white rounded-[2.5rem] p-10 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-48 h-48 bg-agency-gold/10 blur-3xl rounded-full -mr-24 -mt-24" />
+                <h3 className="text-xl font-bold mb-8 relative z-10 flex items-center gap-2">
+                  <TrendingUp size={20} className="text-agency-gold" />
+                  Agency APV Summary
+                </h3>
+                <div className="grid grid-cols-2 gap-8 relative z-10">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">Total APV Submitted</div>
+                    <div className="text-4xl font-bold text-white">{fmtCurrency(ma.apvSubmitted)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">Total APV Placed</div>
+                    <div className="text-4xl font-bold text-agency-gold">{fmtCurrency(ma.apvPlaced)}</div>
+                  </div>
+                  <div className="col-span-2 pt-6 border-t border-white/10">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-xs font-bold uppercase tracking-widest text-white/40">Placement Rate</span>
+                      <span className="text-agency-gold font-bold">80.1%</span>
+                    </div>
+                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div className="h-full bg-agency-gold rounded-full" style={{ width: '80.1%' }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
+                <h3 className="text-xl font-bold mb-2 flex items-center gap-2">
+                  <BarChart3 size={20} className="text-agency-gold" />
+                  Agent Status Breakdown
+                </h3>
+                <p className="text-[10px] text-agency-navy/30 uppercase tracking-widest mb-8">Agents enrolled by {range.label}</p>
+                <div className="space-y-6">
+                  {(['Active', 'Pending', 'Suspended'] as AgentStatus[]).map((s) => {
+                    // Only count agents who had joined by the end of this period
+                    const enrolledInPeriod = agents.filter(a =>
+                      new Date(a.joinDate + 'T00:00:00') <= range.endDate
+                    );
+                    const count = enrolledInPeriod.filter(a => a.status === s).length;
+                    const total = enrolledInPeriod.length || 1;
+                    const pct = Math.round((count / total) * 100);
+                    const colors: Record<AgentStatus, string> = { Active: 'bg-green-500', Pending: 'bg-agency-gold', Suspended: 'bg-red-400' };
+                    return (
+                      <div key={s}>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs font-bold uppercase tracking-widest text-agency-navy/60">{s}</span>
+                          <span className="text-sm font-bold">{count} agents — {pct}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full ${colors[s]} transition-all duration-500`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ─── ACTIVITY REPORT TAB ─── */}
+        {activeTab === 'activity' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+            <div className="grid lg:grid-cols-3 gap-8">
+              {/* Aggregate Funnel */}
+              <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
+                <h3 className="text-xl font-bold mb-8 flex items-center gap-2">
+                  <Activity size={20} className="text-agency-gold" />
+                  Agency Activity Funnel
+                </h3>
+                <div className="space-y-6">
+                  {agencyActivity.map((item) => (
+                    <div key={item.label} className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center text-agency-navy/40">
+                          {item.icon}
+                        </div>
+                        <span className="text-sm font-bold text-agency-navy/60">{item.label}</span>
+                      </div>
+                      <span className="text-lg font-bold">{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Conversion Rates */}
+              <div className="bg-agency-navy text-white rounded-[2.5rem] p-10 shadow-xl">
+                <h3 className="text-xl font-bold mb-8">Agency Conversion Rates</h3>
+                <div className="space-y-8">
+                  {(() => {
+                    const dialToContact = ma.dials > 0 ? (ma.contacts / ma.dials * 100).toFixed(1) + '%' : '—';
+                    const contactToAppt = ma.contacts > 0 ? (ma.bookedAppts / ma.contacts * 100).toFixed(1) + '%' : '—';
+                    const apptToPres = ma.apptsRun > 0 ? (ma.presentations / ma.apptsRun * 100).toFixed(1) + '%' : '—';
+                    const presToSale = ma.presentations > 0 ? (ma.salesCount / ma.presentations * 100).toFixed(1) + '%' : '—';
+                    return [
+                      { label: 'Dial → Contact', value: dialToContact },
+                      { label: 'Contact → Appt', value: contactToAppt },
+                      { label: 'Appt → Presentation', value: apptToPres },
+                      { label: 'Presentation → Sale', value: presToSale },
+                    ].map((s) => (
+                      <div key={s.label}>
+                        <div className="flex justify-between text-xs font-bold uppercase tracking-widest mb-3">
+                          <span>{s.label}</span>
+                          <span className="text-agency-gold">{s.value}</span>
+                        </div>
+                        <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                          <div className="h-full bg-agency-gold transition-all duration-500" style={{ width: s.value !== '—' ? s.value : '0%' }} />
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
+                <h3 className="text-xl font-bold mb-2 flex items-center gap-2">
+                  <Crown size={20} className="text-agency-gold" />
+                  Top Performers
+                </h3>
+                <p className="text-[10px] text-agency-navy/30 uppercase tracking-widest mb-8">By APV placed · {range.label}</p>
+                <div className="space-y-6">
+                  {agentProfitability
+                    .filter(p => {
+                      const agent = agents.find(a => a.id === p.agentId);
+                      return agent && new Date(agent.joinDate + 'T00:00:00') <= range.endDate;
+                    })
+                    .sort((a, b) => b.apvPla - a.apvPla)
+                    .slice(0, 4)
+                    .map((p, i) => {
+                      const agent = agents.find(a => a.id === p.agentId)!;
+                      return (
+                        <div key={p.agentId} className="flex items-center gap-4">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${i === 0 ? 'bg-agency-gold text-white' : 'bg-gray-100 text-agency-navy/60'
+                            }`}>
+                            #{i + 1}
+                          </div>
+                          <div className="flex-1">
+                            <div className="text-sm font-bold">{agent.name}</div>
+                            <div className="text-[10px] text-agency-navy/40 uppercase tracking-widest">
+                              {fmtCurrency(p.apvPla)} placed · {p.apps} apps
+                            </div>
+                          </div>
+                          <div className={`text-xs font-bold ${p.health === 'good' ? 'text-green-500' : p.health === 'caution' ? 'text-amber-500' : 'text-red-400'
+                            }`}>
+                            {p.roi > 0 ? `${p.roi.toFixed(1)}:1` : '—'}
+                          </div>
+                        </div>
+                      );
+                    })
+                  }
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ─── AGENT MANAGEMENT TAB ─── */}
+        {activeTab === 'agents' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
+              <div className="p-8 border-b border-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-bold">Agent Roster</h3>
+                  <p className="text-xs text-agency-navy/40 mt-1 uppercase tracking-widest">Approve, decline, or remove agent access</p>
+                </div>
+                <div className="flex gap-3">
+                  <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-green-100 text-green-700">{activeCount} Active</span>
+                  <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700">{pendingCount} Pending</span>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Agent</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Joined</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Apps</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">APV Sub.</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">APV Placed</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Lead Spend</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Comm. Earned</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">ROI</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Status</th>
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {agents.map((agent) => {
+                      const p = agentProfitability.find(x => x.agentId === agent.id)!;
+                      const isNew = ma.agentJoinedInPeriod(agent.id);
+                      const roiLabel = p.health === 'good' ? 'On Target' : p.health === 'caution' ? 'Caution' : p.health === 'risk' ? 'At Risk' : '—';
+                      const roiColor = p.health === 'good' ? 'text-green-600' : p.health === 'caution' ? 'text-amber-600' : p.health === 'risk' ? 'text-red-500' : 'text-agency-navy/30';
+                      const rowHighlight = p.health === 'risk' ? 'bg-red-50/30' : '';
+                      return (
+                        <tr key={agent.id} className={`hover:bg-gray-50/60 transition-colors ${rowHighlight}`}>
+                          <td className="px-6 py-5">
+                            <div className="flex items-center gap-2">
+                              <div>
+                                <div className="font-bold text-sm flex items-center gap-2">
+                                  {agent.name}
+                                  {isNew && <span className="px-1.5 py-0.5 bg-agency-gold/20 text-agency-gold text-[9px] font-bold uppercase tracking-widest rounded-full">New</span>}
+                                </div>
+                                <div className="text-[10px] text-agency-navy/30">{agent.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-5 text-sm text-agency-navy/60">{agent.joinDate}</td>
+                          <td className="px-6 py-5 font-bold text-sm">{p.apps}</td>
+                          <td className="px-6 py-5 font-bold text-sm">{fmtCurrency(p.apvSub)}</td>
+                          <td className="px-6 py-5 font-bold text-sm text-agency-gold">{fmtCurrency(p.apvPla)}</td>
+                          <td className="px-6 py-5 text-sm text-agency-navy/60">{fmtCurrency(p.leadSpend)}</td>
+                          <td className="px-6 py-5 font-bold text-sm text-green-600">{fmtCurrency(p.comm)}</td>
+                          <td className="px-6 py-5">
+                            <div className={`font-bold text-sm ${roiColor}`}>
+                              {p.roi > 0 ? `${p.roi.toFixed(1)}:1` : '—'}
+                            </div>
+                            <div className={`text-[9px] font-bold uppercase tracking-widest ${roiColor}`}>{roiLabel}</div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${statusBadge(agent.status)}`}>
+                              {agent.status}
+                            </span>
+                          </td>
+                          <td className="px-8 py-5">
+                            <div className="flex items-center gap-2">
+                              {agent.status === 'Pending' && (
+                                <button
+                                  onClick={() => setConfirmAction({ agentId: agent.id, action: 'approve' })}
+                                  title="Approve Agent"
+                                  className="cursor-pointer p-2 rounded-lg bg-green-50 text-green-600 hover:bg-green-100 transition-colors"
+                                >
+                                  <UserCheck size={16} />
+                                </button>
+                              )}
+                              {agent.status === 'Pending' && (
+                                <button
+                                  onClick={() => setConfirmAction({ agentId: agent.id, action: 'decline' })}
+                                  title="Decline Agent"
+                                  className="cursor-pointer p-2 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
+                                >
+                                  <UserX size={16} />
+                                </button>
+                              )}
+                              {agent.status === 'Active' && (
+                                <button
+                                  onClick={() => setConfirmAction({ agentId: agent.id, action: 'decline' })}
+                                  title="Suspend Agent"
+                                  className="cursor-pointer p-2 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
+                                >
+                                  <UserX size={16} />
+                                </button>
+                              )}
+                              {agent.status === 'Suspended' && (
+                                <button
+                                  onClick={() => setConfirmAction({ agentId: agent.id, action: 'approve' })}
+                                  title="Reinstate Agent"
+                                  className="cursor-pointer p-2 rounded-lg bg-green-50 text-green-600 hover:bg-green-100 transition-colors"
+                                >
+                                  <UserCheck size={16} />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setConfirmAction({ agentId: agent.id, action: 'remove' })}
+                                title="Remove Agent"
+                                className="cursor-pointer p-2 rounded-lg bg-gray-100 text-agency-navy/40 hover:bg-red-50 hover:text-red-500 transition-colors"
+                              >
+                                <UserMinus size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </div>
+
+      {/* ─── Confirm Action Modal ─── */}
+      <AnimatePresence>
+        {confirmAction && (() => {
+          const agent = agents.find(a => a.id === confirmAction.agentId);
+          if (!agent) return null;
+          const actionLabel = confirmAction.action === 'approve'
+            ? agent.status === 'Active' ? 'Reinstate' : 'Approve'
+            : confirmAction.action === 'decline' ? (agent.status === 'Active' ? 'Suspend' : 'Decline')
+              : 'Remove';
+          const actionColor = confirmAction.action === 'approve'
+            ? 'bg-green-500 hover:bg-green-600'
+            : confirmAction.action === 'remove'
+              ? 'bg-red-500 hover:bg-red-600'
+              : 'bg-amber-500 hover:bg-amber-600';
+          return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setConfirmAction(null)}
+                className="absolute inset-0 bg-agency-navy/80 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="relative bg-white rounded-[2rem] p-10 shadow-2xl max-w-sm w-full text-center"
+              >
+                <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <Users size={28} className="text-agency-navy" />
+                </div>
+                <h3 className="text-2xl font-bold mb-2">{actionLabel} Agent?</h3>
+                <p className="text-agency-navy/50 text-sm mb-8">
+                  <strong>{agent.name}</strong><br />
+                  {confirmAction.action === 'remove'
+                    ? 'This will permanently remove their access from the portal.'
+                    : confirmAction.action === 'approve'
+                      ? 'This will grant them active portal access.'
+                      : 'This will suspend their portal access.'}
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setConfirmAction(null)}
+                    className="cursor-pointer flex-1 py-4 rounded-xl border border-gray-200 font-bold text-xs uppercase tracking-widest text-agency-navy/60 hover:border-agency-navy transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleAction(confirmAction.agentId, confirmAction.action)}
+                    className={`cursor-pointer flex-1 py-4 rounded-xl font-bold text-xs uppercase tracking-widest text-white transition-all ${actionColor}`}
+                  >
+                    Confirm {actionLabel}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
     </div>
   );
 };
@@ -2226,6 +3121,7 @@ export default function App() {
   }, [view]);
 
   const handleLoginSuccess = () => {
+    // Email/password login — treated as a regular agent (not admin)
     setIsAuthenticated(true);
     setView('dashboard');
   };
@@ -2233,7 +3129,8 @@ export default function App() {
   const handleGoogleSuccess = (googleUser: User) => {
     setUser(googleUser);
     setIsAuthenticated(true);
-    setView('dashboard');
+    // Route to admin dashboard if this email is in the admin whitelist
+    setView(googleUser.isAdmin ? 'admin' : 'dashboard');
   };
 
   const handleLogout = () => {
@@ -2252,7 +3149,7 @@ export default function App() {
       <Navbar
         onNavigate={setView}
         currentView={view}
-        onLoginOpen={() => isAuthenticated ? setView('dashboard') : setIsLoginOpen(true)}
+        onLoginOpen={() => isAuthenticated ? setView(user?.isAdmin ? 'admin' : 'dashboard') : setIsLoginOpen(true)}
         isAuthenticated={isAuthenticated}
         user={user}
       />
@@ -2310,14 +3207,25 @@ export default function App() {
             <AgentDashboard onLogout={handleLogout} />
           </motion.div>
         )}
+
+        {view === 'admin' && isAuthenticated && user?.isAdmin && (
+          <motion.div
+            key="admin"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            <AdminDashboard onLogout={handleLogout} user={user} />
+          </motion.div>
+        )}
       </AnimatePresence>
 
-      {view !== 'dashboard' && <Footer onNavigate={setView} />}
-      {/* Quick-Action Dock — scroll-triggered, hidden on dashboard */}
-      {view !== 'dashboard' && (
+      {view !== 'dashboard' && view !== 'admin' && <Footer onNavigate={setView} />}
+      {/* Quick-Action Dock — scroll-triggered, hidden on dashboard/admin */}
+      {view !== 'dashboard' && view !== 'admin' && (
         <QuickActionDock
           onNavigate={setView}
-          onLoginOpen={() => isAuthenticated ? setView('dashboard') : setIsLoginOpen(true)}
+          onLoginOpen={() => isAuthenticated ? setView(user?.isAdmin ? 'admin' : 'dashboard') : setIsLoginOpen(true)}
           isAuthenticated={isAuthenticated}
         />
       )}
