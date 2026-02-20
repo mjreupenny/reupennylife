@@ -47,9 +47,26 @@ import {
   CheckCircle,
   Zap,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleLogin } from '@react-oauth/google';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// --- Types ---
+
+interface User {
+  name: string;
+  email: string;
+  picture?: string;
+}
+
+/** Decode a Google JWT credential (client-side only — no verification needed here) */
+const decodeGoogleJwt = (token: string): User => {
+  const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+  return { name: payload.name ?? payload.email, email: payload.email, picture: payload.picture };
+};
 
 // --- Components ---
 
@@ -86,11 +103,12 @@ const AgencyLogo = ({ size = 24, className = "" }: { size?: number, className?: 
   </svg>
 );
 
-const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: {
+const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated, user }: {
   onNavigate: (view: string) => void,
   currentView: string,
   onLoginOpen: () => void,
-  isAuthenticated: boolean
+  isAuthenticated: boolean,
+  user?: User
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -157,8 +175,14 @@ const Navbar = ({ onNavigate, currentView, onLoginOpen, isAuthenticated }: {
               : 'border-agency-navy/10 hover:border-agency-gold hover:text-agency-gold'
               }`}
           >
-            {isAuthenticated ? <LayoutDashboard size={14} /> : <Lock size={14} />}
-            {isAuthenticated ? 'Dashboard' : 'Agent Access'}
+            {isAuthenticated && user?.picture ? (
+              <img src={user.picture} alt={user.name} className="w-5 h-5 rounded-full object-cover" referrerPolicy="no-referrer" />
+            ) : isAuthenticated ? (
+              <LayoutDashboard size={14} />
+            ) : (
+              <Lock size={14} />
+            )}
+            {isAuthenticated && user ? user.name.split(' ')[0] : isAuthenticated ? 'Dashboard' : 'Agent Access'}
           </button>
         </div>
 
@@ -263,7 +287,7 @@ const Hero = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
             </h1>
 
             <p className="text-xl md:text-2xl text-agency-navy/60 max-w-xl mb-12 leading-relaxed font-normal">
-              Most families are one major life event away from financial hardship. We specialize in advanced strategies—IBC, DFL, and Living Benefits—that work while you're alive.
+              Most families are one major life event away from financial hardship. We protect families through life insurance — and specialize in advanced strategies like IBC, DFL, and Living Benefits that build wealth while you're alive.
             </p>
 
             <div className="flex flex-wrap items-center gap-8">
@@ -591,7 +615,81 @@ const Crisis = () => {
   );
 };
 
+const REUPENNY_SYSTEM_PROMPT = `You are the Reupenny Life Agency AI guide — a knowledgeable, warm, and concise financial educator specializing in advanced life insurance strategies used by the Reupenny Life Agency.
+
+Your expertise covers:
+- **Infinite Banking Concept (IBC)**: Using whole life insurance as a personal banking system. Policyholders borrow against their cash value, pay themselves back, and recycle the same dollar multiple times.
+- **Debt-Free Life (DFL)**: A strategy where a properly structured Indexed Universal Life (IUL) policy is used to systematically eliminate mortgage and consumer debt while simultaneously building tax-free wealth.
+- **Living Benefits**: Riders on life insurance policies that allow early access to the death benefit if diagnosed with a critical, chronic, or terminal illness — so families are protected while the insured is still alive.
+- **Mortgage Protection**: A term or return-of-premium life insurance policy that ensures the family home is paid off if the breadwinner passes away unexpectedly.
+- **Indexed Universal Life (IUL)**: A permanent policy with cash value linked to a market index (like S&P 500) with a 0% floor (no loss in down markets) and a growth cap.
+- **Section 7702 Wealth Building**: Tax-free growth and tax-free withdrawals through properly structured life insurance, leveraging IRS code 7702.
+- **Carrier Partners**: Reupenny works with SBLI, John Hancock, F&G, North American, Global Atlantic, and other A-rated carriers.
+
+Tone: Expert but approachable. Keep answers to 3–5 sentences unless a detailed explanation is warranted. Never give specific legal or tax advice — advise consulting a licensed professional for individual situations. Always tie the answer back to how Reupenny can help.
+
+If someone asks something unrelated to life insurance or financial planning, kindly redirect them to relevant topics.`;
+
 const LegacyGuide = () => {
+  const [query, setQuery] = useState('');
+  const [answer, setAnswer] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const askAI = async (question: string) => {
+    if (!question.trim()) return;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY ?? (import.meta.env as Record<string, string>)['GEMINI_API_KEY'];
+    if (!apiKey) {
+      setError('unavailable');
+      return;
+    }
+    setLoading(true);
+    setAnswer('');
+    setError('');
+
+    // Embed system context directly in the prompt — works for all model versions
+    const fullPrompt = `${REUPENNY_SYSTEM_PROMPT}\n\n---\n\nUser question: ${question}`;
+
+    // Try models newest → oldest until one succeeds
+    const modelsToTry = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
+    const genAI = new GoogleGenerativeAI(apiKey);
+    let lastError: Error = new Error('No models available');
+
+    for (const modelName of modelsToTry) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(fullPrompt);
+        setAnswer(result.response.text());
+        setLoading(false);
+        return;
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        // Fall through to next model on: not found (404) OR quota exceeded (429)
+        const shouldFallback = lastError.message.includes('not found')
+          || lastError.message.includes('not supported')
+          || lastError.message.includes('404')
+          || lastError.message.includes('429')
+          || lastError.message.includes('quota');
+        if (!shouldFallback) break;
+      }
+    }
+
+    setError('unavailable');
+    console.error('[LegacyGuide AI]', lastError);
+    setLoading(false);
+  };
+
+  const handleSubmit = () => askAI(query);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleSubmit();
+  };
+
+  const handleTag = (tag: string) => {
+    setQuery(tag);
+    askAI(tag);
+  };
+
   return (
     <section id="insights" className="py-32 bg-agency-cream/30">
       <div className="max-w-4xl mx-auto px-6 text-center">
@@ -599,27 +697,77 @@ const LegacyGuide = () => {
         <p className="text-agency-navy/50 uppercase tracking-widest text-sm mb-12">
           Explore how living benefits, mortgage protection, or private banking can secure your family's future.
         </p>
-        <div className="relative max-w-2xl mx-auto mb-12">
+        <div className="relative max-w-2xl mx-auto mb-6">
           <input
             type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="E.g. How does Mortgage Protection keep my family in our home?"
             className="w-full bg-white border border-gray-100 rounded-2xl px-8 py-6 shadow-sm focus:shadow-xl transition-all outline-none pr-32"
           />
-          <button className="absolute right-3 top-3 bottom-3 px-6 bg-agency-navy text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-agency-gold transition-colors">
-            Execute
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !query.trim()}
+            className="absolute right-3 top-3 bottom-3 px-6 bg-agency-navy text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-agency-gold transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {loading ? (
+              <span className="flex items-center gap-1.5">
+                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Thinking
+              </span>
+            ) : 'Execute'}
           </button>
         </div>
-        <div className="flex flex-wrap justify-center gap-3">
+        <div className="flex flex-wrap justify-center gap-3 mb-10">
           {['Mortgage Protection', 'Infinite Banking 101', 'Living Benefits ROI', 'Debt Free Life Strategy'].map((tag) => (
-            <button key={tag} className="px-5 py-2 rounded-full border border-gray-200 text-[10px] font-bold uppercase tracking-widest hover:border-agency-gold hover:text-agency-gold transition-all">
+            <button
+              key={tag}
+              onClick={() => handleTag(tag)}
+              className="px-5 py-2 rounded-full border border-gray-200 text-[10px] font-bold uppercase tracking-widest hover:border-agency-gold hover:text-agency-gold transition-all cursor-pointer"
+            >
               {tag}
             </button>
           ))}
         </div>
+
+        <AnimatePresence>
+          {(answer || error) && (
+            <motion.div
+              key="answer"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+              className={`max-w-2xl mx-auto text-left rounded-2xl px-8 py-7 shadow-sm border ${error
+                ? 'bg-agency-cream border-agency-gold/20'
+                : 'bg-white border-gray-100 text-agency-navy/80'
+                }`}
+            >
+              {error ? (
+                <p className="text-sm text-center text-agency-navy/50 py-2">Our guide is resting — please try again in a moment.</p>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-5 h-5 rounded-full bg-agency-gold flex items-center justify-center">
+                      <Sparkles size={11} className="text-white" />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-agency-gold">Legacy Guide AI</span>
+                  </div>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{answer}</p>
+                </>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </section>
   );
 };
+
 
 const Footer = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
   const footerLinks = [
@@ -662,7 +810,12 @@ const Footer = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
   );
 };
 
-const LoginModal = ({ isOpen, onClose, onLoginSuccess }: { isOpen: boolean, onClose: () => void, onLoginSuccess: () => void }) => {
+const LoginModal = ({ isOpen, onClose, onLoginSuccess, onGoogleSuccess }: {
+  isOpen: boolean,
+  onClose: () => void,
+  onLoginSuccess: () => void,
+  onGoogleSuccess: (user: User) => void
+}) => {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     // Simulate login
@@ -694,12 +847,40 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess }: { isOpen: boolean, onCl
             >
               <X size={24} />
             </button>
-            <div className="text-center mb-10">
+            <div className="text-center mb-8">
               <div className="w-16 h-16 bg-agency-gold/10 rounded-2xl flex items-center justify-center text-agency-gold mx-auto mb-6">
                 <Lock size={32} />
               </div>
               <h2 className="text-3xl font-bold mb-2">Agent Access</h2>
               <p className="text-agency-navy/50 text-sm uppercase tracking-widest">Secure Portal Login</p>
+            </div>
+
+            {/* Google Sign-In */}
+            <div className="mb-6">
+              <div className="flex justify-center">
+                <GoogleLogin
+                  onSuccess={(credentialResponse) => {
+                    if (credentialResponse.credential) {
+                      const user = decodeGoogleJwt(credentialResponse.credential);
+                      onGoogleSuccess(user);
+                      onClose();
+                    }
+                  }}
+                  onError={() => console.error('Google Sign-In failed')}
+                  theme="outline"
+                  size="large"
+                  text="continue_with"
+                  shape="rectangular"
+                  width="360"
+                />
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-4 mb-6">
+              <div className="flex-1 h-px bg-gray-100" />
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-agency-navy/30">or continue with email</span>
+              <div className="flex-1 h-px bg-gray-100" />
             </div>
             <form className="space-y-6" onSubmit={handleLogin}>
               <div>
@@ -1504,21 +1685,23 @@ const SaleEntryModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
 const RecruitingPage = () => {
   return (
     <div className="pt-32 pb-20">
-      <section className="max-w-7xl mx-auto px-6 mb-32">
+
+      {/* ── 1. HERO ── */}
+      <section className="max-w-7xl mx-auto px-6 mb-20">
         <div className="grid lg:grid-cols-2 gap-20 items-center">
-          <motion.div
-            initial={{ opacity: 0, x: -30 }}
-            animate={{ opacity: 1, x: 0 }}
-          >
+          <motion.div initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}>
             <span className="text-agency-gold font-bold uppercase tracking-[0.3em] text-xs mb-6 block">Join Our Mission</span>
             <h1 className="text-6xl md:text-8xl font-bold mb-8 leading-tight">
               Build a Business That <span className="italic text-agency-gold">Matters.</span>
             </h1>
             <p className="text-xl text-agency-navy/60 leading-relaxed mb-10">
-              We aren't just looking for agents. We are looking for leaders who want to revolutionize how families protect their legacies.
+              We aren't just looking for agents. We're looking for leaders who want to revolutionize how families protect their legacies.
             </p>
-            <div className="flex flex-wrap gap-6">
-              <button className="cursor-pointer px-10 py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all">
+            <div className="flex flex-wrap gap-4">
+              <button
+                onClick={() => window.open('https://calendly.com/seta-reupenny/interview-zoom', '_blank', 'noopener,noreferrer')}
+                className="cursor-pointer px-10 py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all"
+              >
                 Apply to Join
               </button>
               <button className="cursor-pointer px-10 py-5 border border-agency-navy/10 rounded-xl font-bold uppercase tracking-widest hover:border-agency-gold transition-all">
@@ -1526,62 +1709,183 @@ const RecruitingPage = () => {
               </button>
             </div>
           </motion.div>
-          <div className="relative">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-4 pt-12">
-                <div className="bg-agency-cream rounded-3xl p-8 aspect-square flex flex-col justify-end">
-                  <DollarSign className="text-agency-gold mb-4" size={32} />
-                  <h3 className="text-xl font-bold">Uncapped Income</h3>
-                </div>
-                <div className="bg-agency-navy text-white rounded-3xl p-8 aspect-square flex flex-col justify-end">
-                  <Users className="text-agency-gold mb-4" size={32} />
-                  <h3 className="text-xl font-bold">World-Class Mentorship</h3>
-                </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-4 pt-12">
+              <div className="bg-agency-cream rounded-3xl p-8 aspect-square flex flex-col justify-end">
+                <DollarSign className="text-agency-gold mb-4" size={32} />
+                <h3 className="text-xl font-bold">Uncapped Income</h3>
               </div>
-              <div className="space-y-4">
-                <div className="bg-agency-gold text-white rounded-3xl p-8 aspect-square flex flex-col justify-end">
-                  <TrendingUp className="text-white mb-4" size={32} />
-                  <h3 className="text-xl font-bold">Scalable Systems</h3>
-                </div>
-                <div className="bg-agency-cream rounded-3xl p-8 aspect-square flex flex-col justify-end">
-                  <GraduationCap className="text-agency-gold mb-4" size={32} />
-                  <h3 className="text-xl font-bold">Elite Training</h3>
-                </div>
+              <div className="bg-agency-navy text-white rounded-3xl p-8 aspect-square flex flex-col justify-end">
+                <Users className="text-agency-gold mb-4" size={32} />
+                <h3 className="text-xl font-bold">World-Class Mentorship</h3>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="bg-agency-gold text-white rounded-3xl p-8 aspect-square flex flex-col justify-end">
+                <TrendingUp className="text-white mb-4" size={32} />
+                <h3 className="text-xl font-bold">Scalable Systems</h3>
+              </div>
+              <div className="bg-agency-cream rounded-3xl p-8 aspect-square flex flex-col justify-end">
+                <GraduationCap className="text-agency-gold mb-4" size={32} />
+                <h3 className="text-xl font-bold">Elite Training</h3>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="bg-agency-cream/30 py-32">
+      {/* ── 2. SOCIAL PROOF STRIP ── */}
+      <section className="bg-agency-navy py-12 mb-24">
+        <div className="max-w-5xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 text-center text-white">
+          {[
+            { stat: 'A-Rated', label: 'Carrier Partners' },
+            { stat: '100%', label: 'Remote Eligible' },
+            { stat: 'IBC · DFL', label: 'Advanced Markets' },
+            { stat: 'Day 1', label: 'Commission Start' },
+          ].map(({ stat, label }) => (
+            <div key={label}>
+              <p className="text-2xl font-bold text-agency-gold mb-1">{stat}</p>
+              <p className="text-white/50 text-xs uppercase tracking-widest">{label}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── 3. WHO WE ARE ── */}
+      <section className="max-w-7xl mx-auto px-6 mb-24">
+        <div className="grid lg:grid-cols-2 gap-16 items-center">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+            <span className="text-agency-gold font-bold uppercase tracking-[0.3em] text-xs mb-6 block">Who We Are</span>
+            <h2 className="text-5xl font-bold mb-6 leading-tight">
+              We're Not an Agency.<br /><span className="italic text-agency-gold">We're a Movement.</span>
+            </h2>
+            <p className="text-agency-navy/60 leading-relaxed mb-4">
+              Reupenny Life Agency was built on one truth: most families are underserved by the life insurance industry — sold products, not solutions. We exist to change that.
+            </p>
+            <p className="text-agency-navy/60 leading-relaxed mb-8">
+              We combine advanced financial strategies with genuine human care to help families build wealth, eliminate debt, and create lasting legacies. And we're building a team of agents who believe the same.
+            </p>
+            {/* Compact values row */}
+            <div className="flex flex-wrap gap-3">
+              {[{ icon: '🤝', label: 'Integrity' }, { icon: '🏡', label: 'Family First' }, { icon: '🏆', label: 'Excellence' }, { icon: '📈', label: 'Growth' }].map(v => (
+                <span key={v.label} className="flex items-center gap-2 px-4 py-2 bg-agency-cream rounded-full text-sm font-bold">
+                  {v.icon} {v.label}
+                </span>
+              ))}
+            </div>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+            className="bg-agency-navy text-white rounded-[3rem] p-14 relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 w-64 h-64 bg-agency-gold/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+            <p className="text-agency-gold text-[10px] font-bold uppercase tracking-widest mb-6">Our Mission</p>
+            <p className="text-2xl font-bold leading-relaxed mb-8">
+              "To protect families through life insurance and empower agents to build independent, purpose-driven businesses."
+            </p>
+            <div className="border-t border-white/10 pt-6">
+              <p className="text-white/40 text-sm">Every policy placed is a family protected. Every agent developed is a community strengthened.</p>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── 4. LEADERSHIP (compact) ── */}
+      <section className="max-w-7xl mx-auto px-6 mb-24">
+        <div className="text-center mb-12">
+          <span className="text-agency-gold font-bold uppercase tracking-[0.3em] text-xs mb-3 block">Leadership</span>
+          <h2 className="text-4xl font-bold">The People Behind the Mission</h2>
+        </div>
+        <div className="grid md:grid-cols-2 gap-6">
+          {[
+            {
+              initials: 'MR', name: 'Miller Reupenny', title: 'Founder & Lead Strategist', npn: 'NPN 21452440',
+              phone: '520-783-7188', tel: 'tel:+15207837188',
+              link: 'https://hihello.me/hi/millerreupenny', linkLabel: 'Business Card',
+            },
+            {
+              initials: 'SR', name: 'Seta Reupenny', title: 'Co-Founder & Operations Director', npn: '',
+              phone: '(520) 447-8105', tel: 'tel:+15204478105',
+              link: 'https://hihello.com/hi/setareupenny', linkLabel: 'Business Card',
+            },
+          ].map(p => (
+            <div key={p.name} className="bg-white border border-gray-100 rounded-3xl p-8 flex items-center gap-6 hover:shadow-md transition-shadow">
+              <div className="w-14 h-14 rounded-full bg-agency-navy flex items-center justify-center shrink-0">
+                <span className="text-agency-gold font-bold text-lg">{p.initials}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-agency-navy">{p.name}</p>
+                <p className="text-agency-navy/50 text-sm">{p.title}</p>
+                {p.npn && <p className="text-agency-navy/30 text-xs">{p.npn}</p>}
+              </div>
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                {p.phone && (
+                  <a href={p.tel} className="text-sm font-medium text-agency-navy hover:text-agency-gold transition-colors flex items-center gap-1">
+                    <Phone size={12} /> {p.phone}
+                  </a>
+                )}
+                <a href={p.link} target="_blank" rel="noopener noreferrer"
+                  className="text-[10px] font-bold uppercase tracking-widest text-agency-gold hover:underline">
+                  {p.linkLabel} →
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── 5. TOP 3 DIFFERENTIATORS ── */}
+      <section className="bg-agency-cream/30 py-24 mb-0">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-20">
-            <h2 className="text-5xl font-bold mb-6">Why Reupenny Life?</h2>
-            <p className="text-agency-navy/50 uppercase tracking-widest text-sm">The premier platform for the modern life insurance professional.</p>
+          <div className="text-center mb-14">
+            <span className="text-agency-gold font-bold uppercase tracking-[0.3em] text-xs mb-3 block">Why Reupenny Life?</span>
+            <h2 className="text-4xl font-bold mb-4">The Platform Built to Scale You</h2>
+            <p className="text-agency-navy/50 text-sm max-w-lg mx-auto">Most agencies give you a contract. We give you a business. Here's what sets us apart.</p>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-12">
+          <div className="grid md:grid-cols-3 gap-8 mb-12">
             {[
-              { title: 'Proprietary Leads', desc: 'The potential to access high-intent lead generation systems designed to help you start strong.', icon: <Search /> },
-              { title: 'Advanced Markets', desc: 'The opportunity to master IBC, DFL, and IUL strategies that can distinguish your practice.', icon: <Shield /> },
-              { title: 'Ownership Culture', desc: 'The possibility of building your own agency with true contract ownership and renewals.', icon: <Briefcase /> },
-              { title: 'Work from Anywhere', desc: 'The freedom to potentially operate your business from anywhere, defining your own ideal workspace.', icon: <Globe /> },
-              { title: 'Flexible Scheduling', desc: 'The opportunity to design a schedule that aligns with your life and personal priorities.', icon: <Clock /> },
-              { title: 'Coaching & Support', desc: 'The opportunity to build and scale your business with guidance from those who have already paved the way.', icon: <Users /> },
-            ].map((item) => (
-              <div key={item.title} className="text-center p-8 bg-white rounded-3xl shadow-sm hover:shadow-md transition-shadow duration-300">
-                <div className="w-16 h-16 bg-agency-cream rounded-2xl flex items-center justify-center text-agency-gold mx-auto mb-8">
+              { title: 'Advanced Markets Access', desc: 'Master IBC, DFL, and IUL — strategies most agents never learn, that can set you apart permanently.', icon: <Shield /> },
+              { title: 'True Contract Ownership', desc: 'Your clients, your renewals, your agency. We build owners, not employees.', icon: <Briefcase /> },
+              { title: 'Mentorship That Works', desc: 'Direct access to leaders who are actively building — not just managing from a distance.', icon: <Users /> },
+            ].map(item => (
+              <div key={item.title} className="bg-white rounded-3xl p-10 hover:shadow-md transition-shadow">
+                <div className="w-14 h-14 bg-agency-cream rounded-2xl flex items-center justify-center text-agency-gold mb-6">
                   {item.icon}
                 </div>
-                <h3 className="text-2xl font-bold mb-4">{item.title}</h3>
-                <p className="text-agency-navy/60 leading-relaxed text-sm">{item.desc}</p>
+                <h3 className="text-xl font-bold mb-3">{item.title}</h3>
+                <p className="text-agency-navy/60 text-sm leading-relaxed">{item.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
+
+      {/* ── 6. CLOSING CTA BANNER ── */}
+      <section className="bg-agency-navy py-24">
+        <div className="max-w-3xl mx-auto px-6 text-center text-white">
+          <p className="text-agency-gold text-xs font-bold uppercase tracking-widest mb-4">Ready to Build?</p>
+          <h2 className="text-5xl font-bold mb-6">Your next chapter starts with one conversation.</h2>
+          <p className="text-white/50 mb-10 text-lg">Apply today and schedule a 20-minute discovery call with our team. No pressure — just a real conversation about your goals.</p>
+          <div className="flex flex-wrap justify-center gap-4">
+            <button
+              onClick={() => window.open('https://calendly.com/seta-reupenny/interview-zoom', '_blank', 'noopener,noreferrer')}
+              className="cursor-pointer px-12 py-5 bg-agency-gold text-white rounded-xl font-bold uppercase tracking-widest hover:bg-white hover:text-agency-navy transition-all"
+            >
+              Apply to Join
+            </button>
+            <a href="tel:+15207837188"
+              className="flex items-center gap-2 px-10 py-5 border border-white/20 text-white rounded-xl font-bold uppercase tracking-widest hover:border-agency-gold transition-all text-sm"
+            >
+              <Phone size={14} /> 520-783-7188
+            </a>
+          </div>
+        </div>
+      </section>
+
     </div>
   );
 };
+
+
 
 const ClientPage = () => {
   return (
@@ -1596,43 +1900,71 @@ const ClientPage = () => {
         </div>
 
         <div className="grid lg:grid-cols-2 gap-8">
+          {/* Left — call info */}
           <div className="bg-agency-navy text-white p-16 rounded-[3rem] flex flex-col justify-between min-h-[500px]">
             <div>
-              <h2 className="text-4xl font-bold mb-6">Request a Strategy Call</h2>
-              <p className="text-white/60 mb-12 max-w-sm">Get a personalized blueprint for your financial future. No cost, no obligation.</p>
+              <p className="text-agency-gold text-[10px] font-bold uppercase tracking-widest mb-4">15-Minute Discovery Call</p>
+              <h2 className="text-4xl font-bold mb-6">Book Your Strategy Session</h2>
+              <p className="text-white/60 mb-8 max-w-sm leading-relaxed">
+                A focused conversation for individuals and families serious about improving their financial protection and long-term strategy. No cost, no obligation.
+              </p>
+              <div className="mb-8">
+                <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold mb-3">We specialize in</p>
+                <div className="flex flex-wrap gap-2">
+                  {['Life Insurance', 'Final Expense', 'Mortgage Protection', 'IUL', 'Debt Free Life', 'Infinite Banking', 'Annuities'].map(s => (
+                    <span key={s} className="text-[10px] font-bold uppercase tracking-wide px-3 py-1 rounded-full border border-white/20 text-white/70">{s}</span>
+                  ))}
+                </div>
+              </div>
             </div>
-            <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
-              <input type="text" placeholder="Full Name" className="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 outline-none focus:border-agency-gold transition-colors" />
-              <input type="email" placeholder="Email Address" className="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 outline-none focus:border-agency-gold transition-colors" />
-              <button className="w-full py-5 bg-agency-gold text-white rounded-xl font-bold uppercase tracking-widest hover:bg-white hover:text-agency-navy transition-all">
-                Schedule My Session
-              </button>
-            </form>
+            <button
+              type="button"
+              onClick={() => window.open('https://calendly.com/miller-reupenny/15-minute-strategy-discovery-call', '_blank', 'noopener,noreferrer')}
+              className="w-full py-5 bg-agency-gold text-white rounded-xl font-bold uppercase tracking-widest hover:bg-white hover:text-agency-navy transition-all cursor-pointer"
+            >
+              Schedule My 15-Min Call
+            </button>
           </div>
+
+          {/* Right — what to expect + agent card */}
           <div className="grid gap-8">
             <div className="bg-agency-cream rounded-[3rem] p-12">
-              <h3 className="text-2xl font-bold mb-4">What to Expect</h3>
-              <div className="space-y-6">
+              <h3 className="text-2xl font-bold mb-2">What We'll Cover</h3>
+              <p className="text-agency-navy/50 text-sm mb-8">During this call we will:</p>
+              <div className="space-y-5">
                 {[
-                  '30-minute deep dive into your goals.',
-                  'Analysis of current debt and savings.',
-                  'Custom roadmap for tax-free growth.',
-                  'Clear next steps for implementation.'
+                  'Review your current coverage and identify any gaps.',
+                  'Clarify your financial priorities and protection needs.',
+                  'Outline how some families eliminate debt in as little as 9 years — without increasing monthly spending.',
+                  'Determine whether a full strategy session makes sense for you.',
                 ].map((step, i) => (
                   <div key={i} className="flex gap-4 items-start">
-                    <div className="w-6 h-6 rounded-full bg-agency-gold text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-1">{i + 1}</div>
-                    <p className="font-medium">{step}</p>
+                    <div className="w-6 h-6 rounded-full bg-agency-gold text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">{i + 1}</div>
+                    <p className="text-sm font-medium leading-relaxed">{step}</p>
                   </div>
                 ))}
               </div>
             </div>
-            <div className="bg-white border border-gray-100 rounded-[3rem] p-12 flex items-center gap-8">
-              <div className="w-20 h-20 bg-agency-gold/10 rounded-full flex items-center justify-center text-agency-gold shrink-0">
-                <Shield size={32} />
+
+            {/* Agent card */}
+            <div className="bg-white border border-gray-100 rounded-[3rem] p-10 flex items-start gap-6">
+              <div className="w-14 h-14 bg-agency-navy rounded-full flex items-center justify-center shrink-0">
+                <span className="text-agency-gold font-bold text-lg">MR</span>
               </div>
               <div>
-                <h3 className="text-xl font-bold mb-2">A-Rated Security</h3>
-                <p className="text-agency-navy/50 text-sm">We only partner with carriers that have stood the test of time for over 100 years.</p>
+                <p className="font-bold text-agency-navy text-lg">Miller Reupenny</p>
+                <p className="text-agency-navy/50 text-sm mb-3">Reupenny Life Agency · NPN 21452440</p>
+                <a href="tel:+15207837188" className="flex items-center gap-2 text-sm font-medium text-agency-navy hover:text-agency-gold transition-colors mb-1">
+                  <Phone size={14} /> 520-783-7188
+                </a>
+                <a
+                  href="https://hihello.me/hi/millerreupenny"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] font-bold uppercase tracking-widest text-agency-gold hover:underline"
+                >
+                  Save Digital Business Card →
+                </a>
               </div>
             </div>
           </div>
@@ -1758,12 +2090,123 @@ const LogoSplash = ({ onComplete }: { onComplete: () => void }) => {
   );
 };
 
+// --- Quick-Action Dock ---
+
+// CSS custom property type extension for gradient vars
+type WithGradientVars = React.CSSProperties & {
+  '--gradient-from'?: string;
+  '--gradient-to'?: string;
+};
+
+const QuickActionDock = ({ onNavigate, onLoginOpen, isAuthenticated }: {
+  onNavigate: (view: string) => void;
+  onLoginOpen: () => void;
+  isAuthenticated: boolean;
+}) => {
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 200);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  const sharePage = async () => {
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Reupenny Life Agency', text: 'Advanced wealth strategies—IBC, DFL, and Living Benefits.', url: window.location.href }); }
+      catch { /* cancelled */ }
+    } else {
+      await navigator.clipboard.writeText(window.location.href);
+    }
+  };
+  const dockItems = [
+    {
+      title: 'Book a Call',
+      icon: <Calendar size={18} />,
+      gradientFrom: '#0d1e3a',
+      gradientTo: '#1e3a6e',
+      action: () => document.getElementById('main-content')?.scrollIntoView({ behavior: 'smooth' }),
+    },
+    {
+      title: 'Join Team',
+      icon: <Users size={18} />,
+      gradientFrom: '#8a6a30',
+      gradientTo: '#c5a059',
+      action: () => onNavigate('recruit'),
+    },
+    {
+      title: 'Share',
+      icon: <ArrowUpRight size={18} />,
+      gradientFrom: '#3a3a5a',
+      gradientTo: '#5a5a8a',
+      action: sharePage,
+    },
+    {
+      title: 'Back to Top',
+      icon: <ChevronRight size={18} className="-rotate-90" />,
+      gradientFrom: '#1e3a1e',
+      gradientTo: '#2e5a2e',
+      action: scrollToTop,
+    },
+    {
+      title: isAuthenticated ? 'Portal' : 'Agent Login',
+      icon: isAuthenticated ? <LayoutDashboard size={18} /> : <Lock size={18} />,
+      gradientFrom: '#6b4a18',
+      gradientTo: '#a07828',
+      action: onLoginOpen,
+    },
+  ];
+
+  return (
+    <AnimatePresence>
+      {scrolled && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          transition={{ duration: 0.35, ease: 'backOut' }}
+          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 flex gap-2.5 px-4 py-2.5 bg-white/90 backdrop-blur-xl rounded-full shadow-2xl shadow-black/10 border border-gray-100"
+        >
+          {dockItems.map(({ title, icon, gradientFrom, gradientTo, action }, idx) => (
+            <button
+              key={idx}
+              onClick={action}
+              style={{
+                '--gradient-from': gradientFrom,
+                '--gradient-to': gradientTo,
+              } as WithGradientVars}
+              className="relative flex items-center justify-center w-11 h-11 rounded-full bg-gray-50 hover:shadow-md transition-all duration-500 hover:w-32 group cursor-pointer overflow-hidden"
+              aria-label={title}
+            >
+              {/* Gradient bg on hover */}
+              <span className="absolute inset-0 rounded-full bg-[linear-gradient(45deg,var(--gradient-from),var(--gradient-to))] opacity-0 transition-all duration-500 group-hover:opacity-100" />
+              {/* Blur glow */}
+              <span className="absolute top-2 inset-x-0 h-full rounded-full bg-[linear-gradient(45deg,var(--gradient-from),var(--gradient-to))] blur-[12px] opacity-0 -z-10 transition-all duration-500 group-hover:opacity-50" />
+              {/* Icon */}
+              <span className="relative z-10 text-gray-400 transition-all duration-300 group-hover:scale-0 group-hover:opacity-0">
+                {icon}
+              </span>
+              {/* Label */}
+              <span className="absolute z-10 text-white text-[11px] font-bold uppercase tracking-widest opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 transition-all duration-300 delay-100 whitespace-nowrap">
+                {title}
+              </span>
+            </button>
+          ))}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
   const [view, setView] = useState('home'); // 'home', 'client', 'recruit', 'dashboard'
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<User | undefined>(undefined);
 
   // Show splash once per browser session
   const [showSplash, setShowSplash] = useState(() => {
@@ -1787,15 +2230,22 @@ export default function App() {
     setView('dashboard');
   };
 
+  const handleGoogleSuccess = (googleUser: User) => {
+    setUser(googleUser);
+    setIsAuthenticated(true);
+    setView('dashboard');
+  };
+
   const handleLogout = () => {
     setIsAuthenticated(false);
+    setUser(undefined);
     setView('home');
   };
 
   return (
     <div className="min-h-screen bg-white selection:bg-agency-gold/30">
       <AnimatePresence>
-        {showSplash && <LogoSplash key="splash" onComplete={handleSplashComplete} />}
+        {showSplash && <LogoSplash onComplete={handleSplashComplete} />}
       </AnimatePresence>
       {/* Skip to main content — keyboard accessibility */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -1804,6 +2254,7 @@ export default function App() {
         currentView={view}
         onLoginOpen={() => isAuthenticated ? setView('dashboard') : setIsLoginOpen(true)}
         isAuthenticated={isAuthenticated}
+        user={user}
       />
 
       <AnimatePresence mode="wait">
@@ -1814,7 +2265,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <main id="main-content">
+            <main id="main-content" className="pb-28">
               <Hero onNavigate={setView} />
               <Partners />
               <Strategies />
@@ -1831,6 +2282,7 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
+            className="pb-28"
           >
             <ClientPage />
           </motion.div>
@@ -1842,6 +2294,7 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
+            className="pb-28"
           >
             <RecruitingPage />
           </motion.div>
@@ -1860,10 +2313,19 @@ export default function App() {
       </AnimatePresence>
 
       {view !== 'dashboard' && <Footer onNavigate={setView} />}
+      {/* Quick-Action Dock — scroll-triggered, hidden on dashboard */}
+      {view !== 'dashboard' && (
+        <QuickActionDock
+          onNavigate={setView}
+          onLoginOpen={() => isAuthenticated ? setView('dashboard') : setIsLoginOpen(true)}
+          isAuthenticated={isAuthenticated}
+        />
+      )}
       <LoginModal
         isOpen={isLoginOpen}
         onClose={() => setIsLoginOpen(false)}
         onLoginSuccess={handleLoginSuccess}
+        onGoogleSuccess={handleGoogleSuccess}
       />
     </div>
   );
