@@ -827,11 +827,12 @@ const Footer = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
   );
 };
 
-const LoginModal = ({ isOpen, onClose, onLoginSuccess, onGoogleSuccess }: {
+const LoginModal = ({ isOpen, onClose, onLoginSuccess, onGoogleSuccess, pendingUser }: {
   isOpen: boolean,
   onClose: () => void,
   onLoginSuccess: () => void,
-  onGoogleSuccess: (user: User) => void
+  onGoogleSuccess: (user: User) => void,
+  pendingUser?: (User & { pendingStatus: 'pending' | 'suspended' }) | null
 }) => {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -872,61 +873,112 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess, onGoogleSuccess }: {
               <p className="text-agency-navy/50 text-sm uppercase tracking-widest">Secure Portal Login</p>
             </div>
 
-            {/* Google Sign-In */}
-            <div className="mb-6">
-              <div className="flex justify-center">
-                <GoogleLogin
-                  onSuccess={(credentialResponse) => {
-                    if (credentialResponse.credential) {
-                      const user = decodeGoogleJwt(credentialResponse.credential);
-                      onGoogleSuccess(user);
-                      onClose();
-                    }
-                  }}
-                  onError={() => console.error('Google Sign-In failed')}
-                  theme="outline"
-                  size="large"
-                  text="continue_with"
-                  shape="rectangular"
-                  width="360"
-                />
+            {/* Show pending/suspended message if user tried to login */}
+            {pendingUser && (
+              <div className={`mb-6 p-6 rounded-2xl border-2 ${
+                pendingUser.pendingStatus === 'suspended' 
+                  ? 'bg-red-50 border-red-200' 
+                  : 'bg-yellow-50 border-yellow-200'
+              }`}>
+                <div className="flex items-start gap-4">
+                  <div className={`flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center ${
+                    pendingUser.pendingStatus === 'suspended'
+                      ? 'bg-red-100 text-red-600'
+                      : 'bg-yellow-100 text-yellow-600'
+                  }`}>
+                    {pendingUser.pendingStatus === 'suspended' ? (
+                      <X size={24} />
+                    ) : (
+                      <Clock size={24} />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className={`font-bold text-lg mb-2 ${
+                      pendingUser.pendingStatus === 'suspended' ? 'text-red-900' : 'text-yellow-900'
+                    }`}>
+                      {pendingUser.pendingStatus === 'suspended' ? 'Account Suspended' : 'Awaiting Approval'}
+                    </h3>
+                    <p className={`text-sm mb-3 ${
+                      pendingUser.pendingStatus === 'suspended' ? 'text-red-700' : 'text-yellow-700'
+                    }`}>
+                      {pendingUser.pendingStatus === 'suspended'
+                        ? 'Your account has been suspended. Please contact an administrator for more information.'
+                        : 'Your login request has been received and is pending approval from an administrator.'}
+                    </p>
+                    <div className="text-xs font-medium opacity-70">
+                      Logged in as: <span className="font-bold">{pendingUser.email}</span>
+                    </div>
+                    {pendingUser.pendingStatus === 'pending' && (
+                      <div className="mt-4 pt-4 border-t border-yellow-200">
+                        <p className="text-xs text-yellow-700">
+                          <strong>Next steps:</strong> An admin will review your request. You'll be able to access the portal once approved.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Divider */}
-            <div className="flex items-center gap-4 mb-6">
-              <div className="flex-1 h-px bg-gray-100" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-agency-navy/30">or continue with email</span>
-              <div className="flex-1 h-px bg-gray-100" />
-            </div>
-            <form className="space-y-6" onSubmit={handleLogin}>
-              <div>
-                <label htmlFor="login-email" className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 mb-2">Agent ID / Email</label>
-                <input
-                  id="login-email"
-                  type="text"
-                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-agency-gold focus-visible:ring-offset-1 transition-colors"
-                  placeholder="agent@reupenny.com"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="login-password" className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 mb-2">Password</label>
-                <input
-                  id="login-password"
-                  type="password"
-                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-agency-gold focus-visible:ring-offset-1 transition-colors"
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-              <button type="submit" className="cursor-pointer w-full py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all shadow-lg hover:shadow-agency-gold/20">
-                Sign In to Dashboard
-              </button>
-              <button type="button" className="cursor-pointer w-full text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 hover:text-agency-gold transition-colors">
-                Forgot Credentials?
-              </button>
-            </form>
+            {/* Only show login options if not showing pending message */}
+            {!pendingUser && (
+              <>
+                {/* Google Sign-In */}
+                <div className="mb-6">
+                  <div className="flex justify-center">
+                    <GoogleLogin
+                      onSuccess={(credentialResponse) => {
+                        if (credentialResponse.credential) {
+                          const user = decodeGoogleJwt(credentialResponse.credential);
+                          onGoogleSuccess(user);
+                        }
+                      }}
+                      onError={() => console.error('Google Sign-In failed')}
+                      theme="outline"
+                      size="large"
+                      text="continue_with"
+                      shape="rectangular"
+                      width="360"
+                    />
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="flex-1 h-px bg-gray-100" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-agency-navy/30">or continue with email</span>
+                  <div className="flex-1 h-px bg-gray-100" />
+                </div>
+                <form className="space-y-6" onSubmit={handleLogin}>
+                  <div>
+                    <label htmlFor="login-email" className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 mb-2">Agent ID / Email</label>
+                    <input
+                      id="login-email"
+                      type="text"
+                      className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-agency-gold focus-visible:ring-offset-1 transition-colors"
+                      placeholder="agent@reupenny.com"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="login-password" className="block text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 mb-2">Password</label>
+                    <input
+                      id="login-password"
+                      type="password"
+                      className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-agency-gold focus-visible:ring-offset-1 transition-colors"
+                      placeholder="••••••••"
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="cursor-pointer w-full py-5 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest hover:bg-agency-gold transition-all shadow-lg hover:shadow-agency-gold/20">
+                    Sign In to Dashboard
+                  </button>
+                  <button type="button" className="cursor-pointer w-full text-[10px] font-bold uppercase tracking-widest text-agency-navy/60 hover:text-agency-gold transition-colors">
+                    Forgot Credentials?
+                  </button>
+                </form>
+              </>
+            )}
           </motion.div>
         </div>
       )}
@@ -1882,6 +1934,9 @@ const AdminDashboard = ({ onLogout, user }: { onLogout: () => void; user?: User 
   const [agents, setAgents] = useState<ManagedAgent[]>(INITIAL_AGENTS);
   const [confirmAction, setConfirmAction] = useState<{ agentId: string; action: 'approve' | 'decline' | 'remove' } | null>(null);
   const [range, setRange] = useState<TimeRange>(defaultRange);
+  const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
+  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
+  const [newSales, setNewSales] = useState<SaleRecord[]>([]);
 
   // Agency-wide metrics for the selected range
   const ma = useDashboardMetrics(range);
@@ -1983,6 +2038,9 @@ const AdminDashboard = ({ onLogout, user }: { onLogout: () => void; user?: User 
             { id: 'overview', label: 'Agency Overview', icon: <LayoutDashboard size={16} /> },
             { id: 'activity', label: 'Activity Report', icon: <Activity size={16} /> },
             { id: 'agents', label: 'Agent Management', icon: <Users size={16} /> },
+            { id: 'my-sales', label: 'My Sales', icon: <FileText size={16} /> },
+            { id: 'my-activity', label: 'My Activity', icon: <TrendingUp size={16} /> },
+            { id: 'my-profitability', label: 'My Profitability', icon: <Calculator size={16} /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -2297,6 +2355,186 @@ const AdminDashboard = ({ onLogout, user }: { onLogout: () => void; user?: User 
             </div>
           </motion.div>
         )}
+
+        {/* ─── MY SALES TAB (Admin's Personal Sales) ─── */}
+        {activeTab === 'my-sales' && (() => {
+          const adminAgentId = 'A-001';
+          const adminMetrics = useDashboardMetrics(range, [adminAgentId]);
+          // Merge MOCK_SALES with newSales
+          const allSales = [...MOCK_SALES, ...newSales];
+          const adminSales = allSales
+            .filter(r => r.agentId === adminAgentId && inRange(r.submittedDate, range))
+            .slice(-15)
+            .reverse();
+          
+          const handleSaveSale = (sale: SaleRecord) => {
+            setNewSales(prev => [...prev, sale]);
+          };
+
+          return (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <div className="flex justify-between items-center">
+                <div className="flex gap-4">
+                  <div className="bg-white px-6 py-3 rounded-xl border border-gray-100 shadow-sm">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 block mb-1">My Apps ({range.label})</span>
+                    <span className="text-xl font-bold">{adminMetrics.appCount}</span>
+                  </div>
+                  <div className="bg-white px-6 py-3 rounded-xl border border-gray-100 shadow-sm">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 block mb-1">My APV Submitted</span>
+                    <span className="text-xl font-bold">{fmtCurrency(adminMetrics.apvSubmitted)}</span>
+                  </div>
+                  <div className="bg-white px-6 py-3 rounded-xl border border-gray-100 shadow-sm">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 block mb-1">My Comm. Earned</span>
+                    <span className="text-xl font-bold text-green-600">{fmtCurrency(adminMetrics.commEarned)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsSaleModalOpen(true)}
+                  className="flex items-center gap-2 px-6 py-4 bg-agency-gold text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-agency-navy transition-all shadow-lg shadow-agency-gold/20"
+                >
+                  <Plus size={18} />
+                  New Sale Entry
+                </button>
+              </div>
+
+              <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
+                <div className="p-8 border-b border-gray-50 flex items-center justify-between">
+                  <h3 className="text-xl font-bold">My Sales Ledger</h3>
+                  <p className="text-xs font-bold uppercase tracking-widest text-agency-navy/40 italic">Personal performance tracking</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="px-8 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Sale ID</th>
+                        <th className="px-8 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">APV</th>
+                        <th className="px-8 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Status</th>
+                        <th className="px-8 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Submitted</th>
+                        <th className="px-8 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Placed</th>
+                        <th className="px-8 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Comm Rate</th>
+                        <th className="px-8 py-4 text-[10px] font-bold uppercase tracking-widest text-agency-navy/40">Comm Earned</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {adminSales.length === 0 ? (
+                        <tr><td colSpan={7} className="px-8 py-12 text-center text-agency-navy/30 text-sm">No apps submitted in this period.</td></tr>
+                      ) : adminSales.map((sale) => (
+                        <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-8 py-6">
+                            <div className="font-bold font-mono text-sm">{sale.id}</div>
+                            <div className="text-[10px] text-agency-navy/30">Policy App</div>
+                          </td>
+                          <td className="px-8 py-6 font-bold text-agency-gold">{fmtCurrency(sale.apv)}</td>
+                          <td className="px-8 py-6">
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+                              sale.status === 'Placed' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
+                            }`}>
+                              {sale.status}
+                            </span>
+                          </td>
+                          <td className="px-8 py-6 text-sm text-agency-navy/60">{sale.submittedDate}</td>
+                          <td className="px-8 py-6 text-sm text-agency-navy/60">{sale.placedDate ?? '—'}</td>
+                          <td className="px-8 py-6 font-bold">{sale.commRate}%</td>
+                          <td className="px-8 py-6 font-bold text-green-600">
+                            {sale.status === 'Placed' ? fmtCurrency(sale.apv * (sale.commRate / 100)) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <SaleEntryModal isOpen={isSaleModalOpen} onClose={() => setIsSaleModalOpen(false)} onSave={handleSaveSale} />
+            </motion.div>
+          );
+        })()}
+
+        {/* ─── MY ACTIVITY TAB (Admin's Personal Activity) ─── */}
+        {activeTab === 'my-activity' && (() => {
+          const adminAgentId = 'A-001';
+          const adminMetrics = useDashboardMetrics(range, [adminAgentId]);
+          const activityFunnel = [
+            { label: 'Dials', value: fmtNum(adminMetrics.dials), icon: <Phone size={18} /> },
+            { label: 'Contacts', value: fmtNum(adminMetrics.contacts), icon: <PhoneCall size={18} /> },
+            { label: 'Booked Appts', value: fmtNum(adminMetrics.bookedAppts), icon: <Target size={18} /> },
+            { label: 'Appts Run', value: fmtNum(adminMetrics.apptsRun), icon: <CheckSquare size={18} /> },
+            { label: 'Presentations', value: fmtNum(adminMetrics.presentations), icon: <Presentation size={18} /> },
+            { label: 'Sales', value: fmtNum(adminMetrics.salesCount), icon: <DollarSign size={18} /> },
+          ];
+
+          return (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setIsActivityModalOpen(true)}
+                  className="flex items-center gap-2 px-6 py-4 bg-agency-gold text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-agency-navy transition-all shadow-lg shadow-agency-gold/20"
+                >
+                  <Plus size={18} />
+                  Log Today's Activity
+                </button>
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-8">
+                <div className="bg-white p-10 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                  <h3 className="text-2xl font-bold mb-8">My Activity Funnel ({range.label})</h3>
+                  <div className="space-y-6">
+                    {activityFunnel.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center text-agency-navy/40">
+                            {item.icon}
+                          </div>
+                          <span className="text-sm font-bold text-agency-navy/60">{item.label}</span>
+                        </div>
+                        <span className="text-lg font-bold">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-agency-navy text-white p-10 rounded-[2.5rem] shadow-xl">
+                  <h3 className="text-2xl font-bold mb-8">My Conversion Rates</h3>
+                  <div className="space-y-8">
+                    {[
+                      { label: 'Dial to Contact', value: adminMetrics.dials > 0 ? `${(adminMetrics.contacts / adminMetrics.dials * 100).toFixed(1)}%` : '—' },
+                      { label: 'Contact to Appt', value: adminMetrics.contacts > 0 ? `${(adminMetrics.bookedAppts / adminMetrics.contacts * 100).toFixed(1)}%` : '—' },
+                      { label: 'Appt to Presentation', value: adminMetrics.apptsRun > 0 ? `${(adminMetrics.presentations / adminMetrics.apptsRun * 100).toFixed(1)}%` : '—' },
+                      { label: 'Presentation to Sale', value: adminMetrics.presentations > 0 ? `${(adminMetrics.salesCount / adminMetrics.presentations * 100).toFixed(1)}%` : '—' },
+                    ].map((stat, i) => (
+                      <div key={stat.label}>
+                        <div className="flex justify-between text-xs font-bold uppercase tracking-widest mb-3">
+                          <span>{stat.label}</span>
+                          <span>{stat.value}</span>
+                        </div>
+                        <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${i === 0 ? 'bg-agency-gold' : i === 1 ? 'bg-white' : i === 2 ? 'bg-white/60' : 'bg-white/30'}`}
+                            style={{ width: stat.value !== '—' ? stat.value : '0%' }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <ActivityEntryModal isOpen={isActivityModalOpen} onClose={() => setIsActivityModalOpen(false)} />
+            </motion.div>
+          );
+        })()}
+
+        {/* ─── MY PROFITABILITY TAB (Admin's Personal Profitability) ─── */}
+        {activeTab === 'my-profitability' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
+              <div className="p-8 border-b border-gray-50">
+                <h3 className="text-xl font-bold">My Profitability</h3>
+              </div>
+              <div className="p-8">
+                <p className="text-agency-navy/60 text-sm">Personal profitability analysis - connect to Supabase to view data</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* ─── Confirm Action Modal ─── */}
@@ -2436,10 +2674,222 @@ const LeadSpendModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
   );
 };
 
-const SaleEntryModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+const ActivityEntryModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+  const [formData, setFormData] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    dials: '',
+    contacts: '',
+    bookedAppts: '',
+    apptsRun: '',
+    presentations: '',
+    sales: ''
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // TODO: Save to Supabase
+    console.log('Activity Entry:', formData);
+    alert('Activity logged successfully! (Supabase integration pending)');
+    
+    // Reset form
+    setFormData({
+      date: new Date().toISOString().slice(0, 10),
+      dials: '',
+      contacts: '',
+      bookedAppts: '',
+      apptsRun: '',
+      presentations: '',
+      sales: ''
+    });
+    onClose();
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-agency-navy/90 backdrop-blur-sm"
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="relative w-full max-w-3xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          >
+            <div className="p-8 border-b border-gray-100 flex items-center justify-between shrink-0">
+              <div>
+                <h2 className="text-2xl font-bold">Log Daily Activity</h2>
+                <p className="text-xs font-bold uppercase tracking-widest text-agency-navy/40 mt-1">Track your daily metrics for accurate performance analysis</p>
+              </div>
+              <button
+                onClick={onClose}
+                aria-label="Close activity entry modal"
+                className="cursor-pointer p-2 hover:bg-gray-50 rounded-full transition-colors"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-8 overflow-y-auto space-y-8">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Date</label>
+                <input
+                  required
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all"
+                />
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Dials</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    value={formData.dials}
+                    onChange={(e) => setFormData({ ...formData, dials: e.target.value })}
+                    placeholder="120"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Contacts</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    value={formData.contacts}
+                    onChange={(e) => setFormData({ ...formData, contacts: e.target.value })}
+                    placeholder="24"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Booked Appts</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    value={formData.bookedAppts}
+                    onChange={(e) => setFormData({ ...formData, bookedAppts: e.target.value })}
+                    placeholder="8"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Appts Run</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    value={formData.apptsRun}
+                    onChange={(e) => setFormData({ ...formData, apptsRun: e.target.value })}
+                    placeholder="6"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Presentations</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    value={formData.presentations}
+                    onChange={(e) => setFormData({ ...formData, presentations: e.target.value })}
+                    placeholder="5"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Sales</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    value={formData.sales}
+                    onChange={(e) => setFormData({ ...formData, sales: e.target.value })}
+                    placeholder="3"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-6 flex gap-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-4 border border-gray-100 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-gray-50 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-[2] py-4 bg-agency-navy text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-agency-gold transition-all shadow-xl shadow-agency-navy/20"
+                >
+                  Save Activity
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const SaleEntryModal = ({ isOpen, onClose, onSave }: { 
+  isOpen: boolean, 
+  onClose: () => void,
+  onSave?: (sale: SaleRecord) => void 
+}) => {
+  const [formData, setFormData] = useState({
+    apv: '',
+    submittedDate: new Date().toISOString().slice(0, 10),
+    placedDate: '',
+    commRate: '110'
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, this would save to a database
+    
+    // Parse APV (remove $ and commas)
+    const apvValue = parseFloat(formData.apv.replace(/[$,]/g, ''));
+    const commRateValue = parseFloat(formData.commRate);
+    
+    // Generate unique sale ID
+    const saleId = `S-NEW-${Date.now()}`;
+    
+    const newSale: SaleRecord = {
+      id: saleId,
+      agentId: 'A-001',
+      apv: apvValue,
+      status: formData.placedDate ? 'Placed' : 'Submitted',
+      submittedDate: formData.submittedDate,
+      placedDate: formData.placedDate || undefined,
+      commRate: commRateValue
+    };
+    
+    if (onSave) {
+      onSave(newSale);
+    }
+    
+    // Reset form
+    setFormData({
+      apv: '',
+      submittedDate: new Date().toISOString().slice(0, 10),
+      placedDate: '',
+      commRate: '110'
+    });
+    
     onClose();
   };
 
@@ -2515,7 +2965,13 @@ const SaleEntryModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">APV (Annual Prem. Vol)</label>
-                      <input required type="text" placeholder="$2,400" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
+                      <input 
+                        required 
+                        type="text" 
+                        placeholder="$2,400" 
+                        value={formData.apv}
+                        onChange={(e) => setFormData({ ...formData, apv: e.target.value })}
+                        className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
                     </div>
                   </div>
                 </div>
@@ -2545,15 +3001,30 @@ const SaleEntryModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => v
                   <div className="grid md:grid-cols-4 gap-4">
                     <div className="space-y-2">
                       <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Date Submitted</label>
-                      <input required type="date" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
+                      <input 
+                        required 
+                        type="date" 
+                        value={formData.submittedDate}
+                        onChange={(e) => setFormData({ ...formData, submittedDate: e.target.value })}
+                        className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Date Placed</label>
-                      <input type="date" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
+                      <input 
+                        type="date" 
+                        value={formData.placedDate}
+                        onChange={(e) => setFormData({ ...formData, placedDate: e.target.value })}
+                        className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Standard Comm. Rate</label>
-                      <input required type="text" defaultValue="110%" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Comm. Rate (%)</label>
+                      <input 
+                        required 
+                        type="text" 
+                        value={formData.commRate}
+                        onChange={(e) => setFormData({ ...formData, commRate: e.target.value })}
+                        placeholder="110" 
+                        className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 outline-none focus:border-agency-gold transition-all" />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-bold uppercase tracking-widest text-agency-navy/40 ml-1">Comm. Override</label>
@@ -3104,6 +3575,7 @@ export default function App() {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<User | undefined>(undefined);
+  const [pendingApprovalUser, setPendingApprovalUser] = useState<(User & { pendingStatus: 'pending' | 'suspended' }) | null>(null);
 
   // Show splash once per browser session
   const [showSplash, setShowSplash] = useState(() => {
@@ -3123,9 +3595,8 @@ export default function App() {
   }, [view]);
 
   const handleLoginSuccess = () => {
-    // Email/password login — treated as a regular agent (not admin)
-    setIsAuthenticated(true);
-    setView('dashboard');
+    // Email/password login is disabled - require Google OAuth + admin approval
+    alert('Email/password login is disabled. Please use Google Sign-In and wait for admin approval.');
   };
 
   const handleGoogleSuccess = async (googleUser: User) => {
@@ -3147,10 +3618,8 @@ export default function App() {
     });
 
     if (!dbUser) {
-      // Supabase not configured yet — fall back to granting access (dev mode)
-      setUser(googleUser);
-      setIsAuthenticated(true);
-      setView('dashboard');
+      // Supabase not configured — deny access
+      alert('Database connection error. Please contact an administrator.');
       return;
     }
 
@@ -3265,9 +3734,13 @@ export default function App() {
       )}
       <LoginModal
         isOpen={isLoginOpen}
-        onClose={() => setIsLoginOpen(false)}
+        onClose={() => {
+          setIsLoginOpen(false);
+          setPendingApprovalUser(null);
+        }}
         onLoginSuccess={handleLoginSuccess}
         onGoogleSuccess={handleGoogleSuccess}
+        pendingUser={pendingApprovalUser}
       />
     </div>
   );
