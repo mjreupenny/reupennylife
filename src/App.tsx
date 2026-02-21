@@ -60,6 +60,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleLogin } from '@react-oauth/google';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { upsertUserOnLogin, updateUserStatus, getPendingUsers, type DBUser, type UserStatus } from './lib/supabase';
+
 
 // --- Types ---
 
@@ -3126,11 +3128,43 @@ export default function App() {
     setView('dashboard');
   };
 
-  const handleGoogleSuccess = (googleUser: User) => {
-    setUser(googleUser);
-    setIsAuthenticated(true);
-    // Route to admin dashboard if this email is in the admin whitelist
-    setView(googleUser.isAdmin ? 'admin' : 'dashboard');
+  const handleGoogleSuccess = async (googleUser: User) => {
+    // Always let admins through immediately
+    if (googleUser.isAdmin) {
+      setUser(googleUser);
+      setIsAuthenticated(true);
+      setView('admin');
+      // Upsert admin in DB (fire and forget)
+      upsertUserOnLogin({ email: googleUser.email, name: googleUser.name, picture: googleUser.picture });
+      return;
+    }
+
+    // For non-admins: upsert in DB and check approval status
+    const dbUser = await upsertUserOnLogin({
+      email: googleUser.email,
+      name: googleUser.name,
+      picture: googleUser.picture,
+    });
+
+    if (!dbUser) {
+      // Supabase not configured yet — fall back to granting access (dev mode)
+      setUser(googleUser);
+      setIsAuthenticated(true);
+      setView('dashboard');
+      return;
+    }
+
+    if (dbUser.status === 'approved') {
+      setUser(googleUser);
+      setIsAuthenticated(true);
+      setView('dashboard');
+    } else if (dbUser.status === 'suspended') {
+      // Show suspended message — keep modal open with error
+      setPendingApprovalUser({ ...googleUser, pendingStatus: 'suspended' });
+    } else {
+      // status === 'pending' — show waiting screen
+      setPendingApprovalUser({ ...googleUser, pendingStatus: 'pending' });
+    }
   };
 
   const handleLogout = () => {
